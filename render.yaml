@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: sagago-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python main.py  
+    rootDir: backend
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./database.db
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://sagago-frontend.vercel.app
+      - key: PORT 
+        value: 10000

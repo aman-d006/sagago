@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+*.db
+*.sqlite3
+instance/
+*.log
+
+# Backend
+backend/__pycache__/
+backend/.venv/
+backend/*.pyc
+backend/.env
+backend/database.db
+backend/uploads/
+
+# Frontend
+sagago-frontend/node_modules/
+sagago-frontend/dist/
+sagago-frontend/build/
+sagago-frontend/.env
+sagago-frontend/.env.local
+sagago-frontend/.env.development.local
+sagago-frontend/.env.production.local
+sagago-frontend/.cache
+sagago-frontend/package-lock.json
+sagago-frontend/yarn.lock
+sagago-frontend/coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

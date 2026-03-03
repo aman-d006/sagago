@@ -1,0 +1,255 @@
+```json
+{
+  "$defs": {
+    "StoryNodeLLM": {
+      "properties": {
+        "content": {
+          "description": "The main content of the story node",
+          "title": "Content",
+          "type": "string"
+        },
+        "isEnding": {
+          "description": "Whether this node is an ending node",
+          "title": "Isending",
+          "type": "boolean"
+        },
+        "isWinningEnding": {
+          "description": "Whether this node is a winning ending",
+          "title": "Iswinningending",
+          "type": "boolean"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StoryOptionLLM"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The options for this node",
+          "title": "Options"
+        }
+      },
+      "required": [
+        "content",
+        "isEnding",
+        "isWinningEnding"
+      ],
+      "title": "StoryNodeLLM",
+      "type": "object"
+    },
+    "StoryOptionLLM": {
+      "properties": {
+        "text": {
+          "description": "the text of the option shown to the user",
+          "title": "Text",
+          "type": "string"
+        },
+        "nextNode": {
+          "$ref": "#/$defs/StoryNodeLLM",
+          "description": "the next node contents and its options"
+        }
+      },
+      "required": [
+        "text",
+        "nextNode"
+      ],
+      "title": "StoryOptionLLM",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "title": {
+      "description": "The title of the story",
+      "title": "Title",
+      "type": "string"
+    },
+    "rootNode": {
+      "$ref": "#/$defs/StoryNodeLLM",
+      "description": "The root node of the story"
+    }
+  },
+  "required": [
+    "title",
+    "rootNode"
+  ]
+}
+
+{
+  "title": "The Quest for the Golden Temple",
+  "rootNode": {
+    "content": "You are a brave adventurer searching for the Golden Temple, a legendary place where treasures beyond your wildest dreams are hidden. According to the ancient map, the temple is guarded by a massive crocodile named Scar.",
+    "isEnding": false,
+    "isWinningEnding": false,
+    "options": [
+      {
+        "text": "Follow the river upstream",
+        "nextNode": {
+          "content": "As you follow the river upstream, you notice the water becoming shallower and the vegetation thicker. You hear the distant sound of rushing water and see a waterfall in the distance.",
+          "isEnding": false,
+          "isWinningEnding": false,
+          "options": [
+            {
+              "text": "Swim through the waterfall",
+              "nextNode": {
+                "content": "You swim through the waterfall and find yourself in a small, tranquil pool. Suddenly, a massive crocodile emerges from the depths of the pool and blocks your path.",
+                "isEnding": false,
+                "isWinningEnding": false,
+                "options": [
+                  {
+                    "text": "Fight the crocodile",
+                    "nextNode": {
+                      "content": "You engage in a fierce battle with the crocodile, but your sword is no match for its powerful jaws. You are devoured by the beast and your quest comes to an end.",
+                      "isEnding": true,
+                      "isWinningEnding": false,
+                      "options": null
+                    }
+                  },
+                  {
+                    "text": "Try to reason with the crocodile",
+                    "nextNode": {
+                      "content": "You try to reason with the crocodile, explaining that you mean no harm and are only searching for the Golden Temple. The crocodile is unmoved, but it does offer you a choice: you can either fight it or try to find a way around it.",
+                      "isEnding": false,
+                      "isWinningEnding": false,
+                      "options": [
+                        {
+                          "text": "Fight the crocodile",
+                          "nextNode": {
+                            "content": "You engage in a fierce battle with the crocodile, but your sword is no match for its powerful jaws. You are devoured by the beast and your quest comes to an end.",
+                            "isEnding": true,
+                            "isWinningEnding": false,
+                            "options": null
+                          }
+                        },
+                        {
+                          "text": "Find a way around the crocodile",
+                          "nextNode": {
+                            "content": "You carefully make your way around the crocodile, avoiding its snapping jaws and searching for a way to continue your journey.",
+                            "isEnding": false,
+                            "isWinningEnding": false,
+                            "options": [
+                              {
+                                "text": "Find a hidden path",
+                                "nextNode": {
+                                  "content": "You find a hidden path that leads you deeper into the jungle, avoiding the crocodile and its lair.",
+                                  "isEnding": false,
+                                  "isWinningEnding": false,
+                                  "options": [
+                                    {
+                                      "text": "Continue on the path",
+                                      "nextNode": {
+                                        "content": "You continue on the path, which winds its way through the jungle and leads you to the entrance of the Golden Temple.",
+                                        "isEnding": false,
+                                        "isWinningEnding": false,
+                                        "options": [
+                                          {
+                                            "text": "Enter the temple",
+                                            "nextNode": {
+                                              "content": "You enter the temple and find yourself in a grand hall filled with treasures beyond your wildest dreams. You have reached the end of your quest and have achieved your goal.",
+                                              "isEnding": true,
+                                              "isWinningEnding": true,
+                                              "options": null
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "text": "Try to sneak past the crocodile",
+              "nextNode": {
+                "content": "You try to sneak past the crocodile, but it sees you and gives chase. You run as fast as you can, but the crocodile is gaining on you.",
+                "isEnding": false,
+                "isWinningEnding": false,
+                "options": [
+                  {
+                    "text": "Dive into the water",
+                    "nextNode": {
+                      "content": "You dive into the water and try to swim away from the crocodile. However, the crocodile follows you and you are soon trapped.",
+                      "isEnding": true,
+                      "isWinningEnding": false,
+                      "options": null
+                    }
+                  },
+                  {
+                    "text": "Keep running",
+                    "nextNode": {
+                      "content": "You keep running, but the crocodile is gaining on you. You can hear its roar getting closer and closer.",
+                      "isEnding": false,
+                      "isWinningEnding": false,
+                      "options": [
+                        {
+                          "text": "Try to distract the crocodile",
+                          "nextNode": {
+                            "content": "You try to distract the crocodile with a rock, but it is too clever and sees right through your plan. You are soon overtaken and devoured by the beast.",
+                            "isEnding": true,
+                            "isWinningEnding": false,
+                            "options": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "text": "Explore the jungle",
+      "nextNode": {
+        "content": "You decide to explore the jungle, searching for any clues that might lead you to the Golden Temple. As you walk, you notice that the vegetation is becoming thicker and the air is growing hotter.",
+        "isEnding": false,
+        "isWinningEnding": false,
+        "options": [
+          {
+            "text": "Follow a narrow path",
+            "nextNode": {
+              "content": "You follow a narrow path that winds its way through the jungle, leading you deeper and deeper into the heart of the forest.",
+              "isEnding": false,
+              "isWinningEnding": false,
+              "options": [
+                {
+                  "text": "Enter a clearing",
+                  "nextNode": {
+                    "content": "You enter a clearing and find yourself face to face with a massive crocodile. It is Scar, the guardian of the Golden Temple.",
+                    "isEnding": false,
+                    "isWinningEnding": false,
+                    "options": [
+                      {
+                        "text": "Fight the crocodile",
+                        "nextNode": {
+                          "content": "You engage in a fierce battle with Scar, but your sword is no match for its powerful jaws. You are devoured by the beast and your quest comes to an end.",
+                          "isEnding": true,
+                          "isWinningEnding": false,
+                          "options": null
+                        }
+                      },
+                      {
+                        "text": "Try to reason with the crocodile",
+                        "nextNode": {
+                          "content": "You try to reason with Scar, explaining that you mean no harm and are only searching for the Golden Temple. Scar is unmoved, but it does offer you a choice: you can either fight it or try to find a way around it.",
+                          "isEnding": false,
+                          "isWinningEnding": false,
+                          "options": [
+                            {
+                              "text": "Fight the crocodile",
+                              "nextNode

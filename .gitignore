@@ -1,40 +1,37 @@
+@"
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+sagago-frontend/.env
+*.env
+!*.env.example
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
 .venv/
-ENV/
-env.bak/
-venv.bak/
-*.db
-*.sqlite3
-instance/
-*.log
-
-# Backend
+venv/
 backend/__pycache__/
 backend/.venv/
-backend/*.pyc
-backend/.env
-backend/database.db
+*.db
+*.sqlite3
 backend/uploads/
+backend/*.pyc
+
+# Backend backup folders
+*-backup/
+backup-*/
+backend-backup/
 
 # Frontend
 sagago-frontend/node_modules/
 sagago-frontend/dist/
 sagago-frontend/build/
-sagago-frontend/.env
-sagago-frontend/.env.local
-sagago-frontend/.env.development.local
-sagago-frontend/.env.production.local
 sagago-frontend/.cache
-sagago-frontend/package-lock.json
-sagago-frontend/yarn.lock
 sagago-frontend/coverage/
+sagago-frontend/package-lock.json
 
 # IDE
 .vscode/
@@ -43,3 +40,4 @@ sagago-frontend/coverage/
 *.swo
 *~
 .DS_Store
+"@ | Out-File -FilePath .gitignore -Encoding UTF8 -Force

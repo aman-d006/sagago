@@ -4,6 +4,7 @@ import 'react-toastify/dist/ReactToastify.css'
 import { useAuthStore } from './stores/authStore'
 import { useEffect, useState } from 'react'
 import { Loader } from 'lucide-react'
+import './testEnv'
 
 import Landing from './pages/Landing'
 import Login from './pages/Login'

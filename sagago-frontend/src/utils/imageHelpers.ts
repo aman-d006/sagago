@@ -1,28 +1,55 @@
-export const getImageUrl = (url?: string): string | null => {
+// src/utils/imageHelpers.ts
+import { API_CONFIG } from '../config/api'
+
+export const getImageUrl = (url?: string | null): string | null => {
   if (!url) {
-    console.log('getImageUrl: No URL provided')
+    if (import.meta.env.DEV) {
+      console.log('getImageUrl: No URL provided')
+    }
     return null
   }
   
-  console.log('getImageUrl: Original URL:', url)
+  if (import.meta.env.DEV) {
+    console.log('getImageUrl: Original URL:', url)
+  }
   
-  if (url.startsWith('http')) {
-    console.log('getImageUrl: Using HTTP URL directly:', url)
+  // If it's already a full URL, return as is
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     return url
   }
   
-  if (url.startsWith('/uploads')) {
-    const fullUrl = `http://localhost:8000${url}`
+  // Remove trailing slash from image base URL
+  const baseUrl = API_CONFIG.imageBaseURL.replace(/\/$/, '')
+  
+  // Ensure URL starts with /
+  const path = url.startsWith('/') ? url : `/${url}`
+  
+  // Construct full URL
+  const fullUrl = `${baseUrl}${path}`
+  
+  if (import.meta.env.DEV) {
     console.log('getImageUrl: Constructed full URL:', fullUrl)
-    return fullUrl
   }
   
-  if (url.startsWith('data:')) {
-    console.log('getImageUrl: Using data URL')
-    return url
-  }
-  
-  const constructedUrl = `http://localhost:8000/uploads/stories/${url.split('/').pop()}`
-  console.log('getImageUrl: Constructed from filename:', constructedUrl)
-  return constructedUrl
+  return fullUrl
+}
+
+// Helper for story cover images
+export const getStoryCoverUrl = (coverPath?: string | null): string | null => {
+  return getImageUrl(coverPath)
+}
+
+// Helper for avatar images
+export const getAvatarUrl = (avatarPath?: string | null): string | null => {
+  return getImageUrl(avatarPath)
+}
+
+// Helper to check if an image exists
+export const checkImageExists = (url: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = url
+  })
 }

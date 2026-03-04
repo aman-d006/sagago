@@ -1,37 +1,78 @@
+// src/api/client.ts
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-console.log('🔍 API URL:', API_URL)
+// Log the environment variables
+console.log('🌍 Environment Variables:', {
+  VITE_API_URL: import.meta.env.VITE_API_URL,
+  VITE_IMAGE_BASE_URL: import.meta.env.VITE_IMAGE_BASE_URL,
+  MODE: import.meta.env.MODE,
+  DEV: import.meta.env.DEV
+})
+
+const API_URL = import.meta.env.VITE_API_URL
+
+if (!API_URL) {
+  console.error('❌ VITE_API_URL is not defined!')
+} else {
+  console.log('✅ Using API URL:', API_URL)
+}
 
 const apiClient = axios.create({
-  baseURL: API_URL,
+  baseURL: API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : ''),
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, 
 })
 
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  console.log('🔍 Request:', config.method?.toUpperCase(), config.url)
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-    console.log('🔍 Token found:', token.substring(0, 20) + '...')
+
+// Request interceptor to add token
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    
+    // Log requests in development
+    if (import.meta.env.DEV) {
+      console.log(`🔍 Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, 
+        config.data || config.params || '')
+    }
+    
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
   }
-  return config
-})
+)
 
+// Response interceptor for error handling
 apiClient.interceptors.response.use(
   (response) => {
-    console.log('🔍 Response success:', response.status)
+    // Log responses in development
+    if (import.meta.env.DEV) {
+      console.log(`🔍 Response success: ${response.status}`, response.data)
+    }
     return response
   },
   (error) => {
-    console.log('🔍 Response error:', error.response?.status, error.response?.data)
+    // Log errors in development
+    if (import.meta.env.DEV) {
+      console.log(`🔍 Response error:`, {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      })
+    }
+    
     if (error.response?.status === 401) {
+      // Handle unauthorized access
       localStorage.removeItem('token')
+      localStorage.removeItem('user')
       window.location.href = '/login'
     }
+    
     return Promise.reject(error)
   }
 )

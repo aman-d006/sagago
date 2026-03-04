@@ -11,8 +11,6 @@ import {
   MoreVertical,
   Check,
   CheckCheck,
-  Phone,
-  Video,
   Info,
   ArrowLeft,
   PlusCircle,
@@ -409,9 +407,7 @@ const Messages = () => {
                           </span>
                         )}
                       </div>
-                      {conv.is_online && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                      )}
+                      {/* Online status indicator removed */}
                     </div>
                     
                     <div className="flex-1 min-w-0">
@@ -466,28 +462,19 @@ const Messages = () => {
                         </span>
                       )}
                     </div>
-                    {selectedConversation.is_online && (
-                      <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white"></div>
-                    )}
+                    {/* Online status indicator removed */}
                   </div>
                   
                   <div>
                     <h3 className="font-semibold text-gray-900">
                       {selectedConversation.username}
                     </h3>
-                    <p className="text-xs text-gray-500">
-                      {selectedConversation.is_online ? 'Online' : 'Offline'}
-                    </p>
+                    {/* Online/Offline text removed */}
                   </div>
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <button className="p-2 hover:bg-gray-100 rounded-full">
-                    <Phone className="w-5 h-5 text-gray-600" />
-                  </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-full">
-                    <Video className="w-5 h-5 text-gray-600" />
-                  </button>
+                  {/* Phone and Video buttons removed */}
                   <button className="p-2 hover:bg-gray-100 rounded-full">
                     <Info className="w-5 h-5 text-gray-600" />
                   </button>

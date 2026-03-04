@@ -1,15 +1,14 @@
-[project]
-name = "backend"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = [
-    "fastapi[all]>=0.128.4",
-    "langchain>=1.2.9",
-    "httpx>=0.24.0",
-    "psycopg2-binary>=2.9.11",
-    "python-dotenv>=1.2.1",
-    "sqlalchemy>=2.0.46",
-    "uvicorn>=0.40.0",
-]
+services:
+  - type: web
+    name: sagago-backend
+    runtime: python
+    buildCommand: pip install --upgrade pip && pip install --only-binary :all: -r requirements.txt
+    startCommand: python main.py
+    rootDir: backend
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./database.db
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: http://localhost:3000,http://localhost:5173

@@ -4,7 +4,6 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig(({ mode }) => {
-  // Load env file based on `mode`
   const env = loadEnv(mode, process.cwd(), '')
   
   console.log('Loaded env:', {
@@ -22,6 +21,31 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      open: true, // Auto-open browser in development
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: mode === 'development', // Source maps only in development
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          drop_console: mode === 'production', // Remove console.log in production
+          drop_debugger: true,
+        },
+      },
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+            ui: ['lucide-react', 'framer-motion'],
+            state: ['zustand', '@tanstack/react-query'],
+          },
+        },
+      },
+    },
+    preview: {
+      port: 4173,
+      open: true,
     },
     envPrefix: 'VITE_',
   }

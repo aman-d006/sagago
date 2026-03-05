@@ -21,14 +21,7 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting up SagaGo API...")
     logger.info(f"🌍 Environment: {'Render' if os.getenv('RENDER') else 'Development'}")
     
-    if os.getenv("RENDER"):
-        logger.info("📁 Checking Render disk...")
-        os.makedirs("/data", exist_ok=True)
-        try:
-            files = os.listdir("/data")
-            logger.info(f"📁 /data contents: {files}")
-        except Exception as e:
-            logger.error(f"❌ Cannot list /data: {e}")
+    # Remove all Render disk checking code - you don't have a disk attached
     
     logger.info("📊 Initializing database...")
     create_tables()
@@ -66,10 +59,8 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if os.getenv("RENDER"):
-    UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, settings.UPLOAD_DIR))
-else:
-    UPLOAD_DIR = os.path.join(BASE_DIR, settings.UPLOAD_DIR)
+# Simplified upload directory - no special Render handling needed
+UPLOAD_DIR = os.path.join(BASE_DIR, settings.UPLOAD_DIR)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "stories"), exist_ok=True)

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 import os
@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     GROQ_USE_FALLBACK: bool = True
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024
+    
+    USE_TURSO: Optional[bool] = False
+    TURSO_DATABASE_URL: Optional[str] = None
+    TURSO_AUTH_TOKEN: Optional[str] = None
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
@@ -27,6 +31,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 settings = Settings()
 
@@ -34,3 +39,4 @@ ALLOWED_ORIGINS_LIST = [origin.strip() for origin in settings.ALLOWED_ORIGINS.sp
 
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(settings.UPLOAD_DIR, "stories"), exist_ok=True)
+os.makedirs(os.path.join(settings.UPLOAD_DIR, "avatars"), exist_ok=True)

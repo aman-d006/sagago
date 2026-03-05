@@ -27,26 +27,37 @@ class TursoClient:
         """Execute a SQL query synchronously"""
         url = f"{self.base_url}/v2/pipeline"
         
-        # Format for Turso API
+        # Format based on the working test
+        # The test showed that 'sql' field might be expected
         stmt = {
-            "q": sql,
+            "sql": sql,  # Changed from 'q' to 'sql'
             "params": params or []
         }
         
         payload = {
             "requests": [
-                {"type": "execute", "stmt": stmt},
-                {"type": "close"}
+                {"type": "execute", "stmt": stmt}
             ]
         }
         
         try:
+            logger.debug(f"Executing SQL: {sql[:100]}...")
+            logger.debug(f"Payload: {json.dumps(payload)[:200]}")
+            
             response = self.session.post(url, json=payload)
+            
             if response.status_code != 200:
                 logger.error(f"Turso error: {response.status_code} - {response.text}")
-                raise Exception(f"Database error: {response.status_code}")
+                try:
+                    error_data = response.json()
+                    raise Exception(f"Database error: {error_data.get('error', response.text)}")
+                except:
+                    raise Exception(f"Database error: {response.status_code}")
             
-            return response.json()
+            result = response.json()
+            logger.debug(f"Query result: {str(result)[:200]}")
+            return result
+            
         except Exception as e:
             logger.error(f"Execute error: {e}")
             raise
@@ -54,9 +65,17 @@ class TursoClient:
     def query(self, sql: str, params: List[Any] = None):
         """Execute a query and return results"""
         result = self.execute(sql, params)
-        if result and 'results' in result and len(result['results']) > 0:
-            return result['results'][0].get('response', {}).get('result', {}).get('rows', [])
-        return []
+        
+        # Parse the response format
+        rows = []
+        if result and 'results' in result:
+            for res in result['results']:
+                if res.get('type') == 'ok' and 'response' in res:
+                    response = res['response']
+                    if 'result' in response and 'rows' in response['result']:
+                        rows.extend(response['result']['rows'])
+        
+        return rows
 
     def execute_batch(self, statements: List[tuple]):
         """Execute multiple statements in a transaction"""
@@ -66,9 +85,8 @@ class TursoClient:
         for sql, params in statements:
             requests_list.append({
                 "type": "execute",
-                "stmt": {"q": sql, "params": params or []}
+                "stmt": {"sql": sql, "params": params or []}
             })
-        requests_list.append({"type": "close"})
         
         payload = {"requests": requests_list}
         

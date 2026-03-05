@@ -7,7 +7,7 @@ import logging
 
 from core.config import settings, ALLOWED_ORIGINS_LIST
 from routers import story, job, auth, like, comment, follow, feed, notification, analytics, user, bookmark, message, template
-from db.database import create_tables, check_database, engine
+from db.database import create_tables, check_database, engine, init_database_pool, shutdown_database, get_database_stats
 from db.init_templates import init_templates
 
 logging.basicConfig(
@@ -21,9 +21,11 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting up SagaGo API...")
     logger.info(f"🌍 Environment: {'Render' if os.getenv('RENDER') else 'Development'}")
     
-    # Remove all Render disk checking code - you don't have a disk attached
+    # Initialize database connection pool
+    logger.info("📊 Initializing database pool...")
+    init_database_pool()
     
-    logger.info("📊 Initializing database...")
+    logger.info("📊 Initializing database tables...")
     create_tables()
     
     if check_database():
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("🛑 Shutting down...")
+    shutdown_database()
     engine.dispose()
     logger.info("✅ Shutdown complete")
 
@@ -59,7 +62,6 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Simplified upload directory - no special Render handling needed
 UPLOAD_DIR = os.path.join(BASE_DIR, settings.UPLOAD_DIR)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -94,6 +96,11 @@ async def health_check():
         "database": db_status,
         "upload_dir": UPLOAD_DIR
     }
+
+@app.get("/stats")
+async def stats():
+    """Get database and connection pool statistics"""
+    return get_database_stats()
 
 if __name__ == "__main__":
     import uvicorn

@@ -46,6 +46,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+@app.get("/api/debug-cors")
+async def debug_cors():
+    return {"message": "CORS is working!", "origins": ALLOWED_ORIGINS_LIST}
+
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "https://sagago.vercel.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, *"
+    return response
+
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=ALLOWED_ORIGINS_LIST,

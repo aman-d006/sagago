@@ -1,3 +1,4 @@
+# database.py
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -6,9 +7,32 @@ import logging
 
 from core.config import settings
 
+# Try to import Turso dialect if available
+try:
+    from db.turso_dialect import TursoDialect
+    TURSO_AVAILABLE = True
+except ImportError:
+    TURSO_AVAILABLE = False
+    logging.warning("Turso dialect not available, using SQLite only")
+
 logger = logging.getLogger(__name__)
 
 def get_database_url():
+    # Check if we should use Turso
+    if os.getenv("USE_TURSO") and TURSO_AVAILABLE:
+        turso_url = os.getenv("TURSO_DATABASE_URL")
+        turso_token = os.getenv("TURSO_AUTH_TOKEN")
+        
+        if turso_url and turso_token:
+            # Format: turso+http://?database_url=...&auth_token=...
+            from urllib.parse import quote
+            encoded_url = quote(turso_url, safe='')
+            encoded_token = quote(turso_token, safe='')
+            db_url = f"turso+http://?database_url={encoded_url}&auth_token={encoded_token}"
+            logger.info("📁 Using Turso distributed database")
+            return db_url
+    
+    # Render disk fallback
     if os.getenv("RENDER"):
         db_path = "/data/sagago.db"
         os.makedirs("/data", exist_ok=True)
@@ -25,29 +49,47 @@ def get_database_url():
         database_url = f"sqlite:///{db_path}"
         logger.info(f"📁 Using Render disk database at: {db_path}")
         return database_url
-    
+
+    # Local development
     if settings.DATABASE_URL:
         logger.info(f"📁 Using configured database URL")
         return settings.DATABASE_URL
-    
+
     logger.info("📁 Using local SQLite database")
     return "sqlite:///./sagago.db"
 
 DATABASE_URL = get_database_url()
+logger.info(f"📁 Database URL type: {DATABASE_URL.split('://')[0]}")
 
-if DATABASE_URL.startswith("sqlite"):
+# Create engine with appropriate settings
+if DATABASE_URL.startswith("turso"):
+    # Turso engine
+    from sqlalchemy import create_engine
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+    logger.info("✅ Using Turso distributed SQLite")
+    
+elif DATABASE_URL.startswith("sqlite"):
+    # Local SQLite
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False},
         pool_pre_ping=True,
         pool_recycle=3600,
     )
+    logger.info("✅ Using SQLite")
+    
 else:
+    # PostgreSQL or other
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
         pool_recycle=3600,
     )
+    logger.info("✅ Using other database")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -64,7 +106,8 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
     logger.info("✅ Tables created/verified")
     
-    if DATABASE_URL.startswith("sqlite"):
+    # SQLite-specific migrations (for local SQLite only)
+    if DATABASE_URL.startswith("sqlite") and not DATABASE_URL.startswith("turso"):
         try:
             with engine.begin() as conn:
                 result = conn.execute(text("PRAGMA table_info('story_jobs')"))
@@ -85,16 +128,18 @@ def create_tables():
 def check_database():
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
+            conn.execute(text("SELECT 1"))
             logger.info("✅ Database connection successful")
             
-            if os.getenv("RENDER") and DATABASE_URL.startswith("sqlite"):
+            # Test write for local SQLite
+            if DATABASE_URL.startswith("sqlite") and not DATABASE_URL.startswith("turso"):
                 try:
                     conn.execute(text("CREATE TABLE IF NOT EXISTS _test (id INTEGER)"))
                     conn.execute(text("DROP TABLE _test"))
                     logger.info("✅ Database is writable")
                 except Exception as e:
                     logger.error(f"❌ Database write test failed: {e}")
+            
             return True
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")

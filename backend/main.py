@@ -52,6 +52,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

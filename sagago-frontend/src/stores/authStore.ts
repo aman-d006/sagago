@@ -65,7 +65,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true })
     try {
       console.log('🔍 Attempting registration:', data)
-      await apiClient.post('/auth/register', data)
+      const formData = new FormData()
+      formData.append('email', data.email)
+      formData.append('username', data.username)
+      formData.append('password', data.password)
+      if (data.full_name) {
+        formData.append('full_name', data.full_name)
+      }
+      
+      await apiClient.post('/auth/register', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
       await useAuthStore.getState().login(data.username, data.password)
     } catch (error: any) {
       console.error('🔍 Registration error:', error.response?.data || error.message)

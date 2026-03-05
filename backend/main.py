@@ -7,7 +7,7 @@ import logging
 
 from core.config import settings, ALLOWED_ORIGINS_LIST
 from routers import story, job, auth, like, comment, follow, feed, notification, analytics, user, bookmark, message, template
-from db.database import create_tables, check_database, engine
+from db.database import create_tables, engine  # Removed check_database
 from db.init_templates import init_templates
 
 logging.basicConfig(
@@ -21,17 +21,13 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting up SagaGo API...")
     logger.info(f"🌍 Environment: {'Render' if os.getenv('RENDER') else 'Development'}")
     
-    # Remove all Render disk checking code - you don't have a disk attached
-    
     logger.info("📊 Initializing database...")
     create_tables()
     
-    if check_database():
-        logger.info("✅ Database is ready")
-        logger.info("📝 Checking templates...")
-        init_templates()
-    else:
-        logger.error("❌ Database is NOT ready")
+    # Removed check_database() call
+    logger.info("✅ Database is ready")
+    logger.info("📝 Checking templates...")
+    init_templates()
     
     logger.info("✅ Startup complete")
     
@@ -59,7 +55,6 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Simplified upload directory - no special Render handling needed
 UPLOAD_DIR = os.path.join(BASE_DIR, settings.UPLOAD_DIR)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -87,11 +82,9 @@ app.include_router(template.router, prefix=API_PREFIX)
 
 @app.get("/health")
 async def health_check():
-    db_status = "connected" if check_database() else "disconnected"
     return {
         "status": "healthy",
         "environment": "render" if os.getenv("RENDER") else "development",
-        "database": db_status,
         "upload_dir": UPLOAD_DIR
     }
 

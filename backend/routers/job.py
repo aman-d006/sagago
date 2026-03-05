@@ -1,75 +1,178 @@
+# routers/job.py
 import uuid
 from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from sqlalchemy.orm import Session
+import logging
 
-from db.database import get_db, SessionLocal
-from models.job import StoryJob
-from schemas.job import StoryJobResponse, StoryJobCreate
-from core.story_generator import StoryGenerator 
+from db.database import get_db, settings
+from db import helpers
+from core.story_generator import StoryGenerator
+from core.auth import get_current_user_optional  # Add this import!
 
-router = APIRouter(
-    prefix="/jobs",
-    tags=["jobs"]
-)
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
-@router.post("/", response_model=StoryJobResponse)
+@router.post("/", response_model=dict)
 def create_job(
-    job_data: StoryJobCreate,
+    job_data: dict,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    current_user = Depends(get_current_user_optional)  # Now this will work
 ):
+    theme = job_data.get("theme")
+    if not theme:
+        raise HTTPException(status_code=400, detail="Theme is required")
+    
     job_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
     
-    job = StoryJob(
-        job_id=job_id,
-        session_id="temp_session", 
-        theme=job_data.theme,
-        status="pending"
-    )
-    db.add(job)
-    db.commit()
+    logger.info(f"📋 Creating job {job_id} with theme: {theme}")
     
-
-    background_tasks.add_task(
-        process_story_job,
-        job_id=job_id,
-        theme=job_data.theme
-    )
+    if settings.USE_TURSO:
+        job = {
+            "job_id": job_id,
+            "session_id": session_id,
+            "theme": theme,
+            "status": "pending"
+        }
+        
+        helpers.create_job(job)
+        
+        background_tasks.add_task(
+            process_story_job,
+            job_id=job_id,
+            theme=theme,
+            session_id=session_id,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return {"job_id": job_id, "status": "pending"}
     
-    return job
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        
+        db = next(get_db())
+        
+        job = StoryJob(
+            job_id=job_id,
+            session_id=session_id,
+            theme=theme,
+            status="pending"
+        )
+        db.add(job)
+        db.commit()
+        
+        background_tasks.add_task(
+            process_story_job,
+            job_id=job_id,
+            theme=theme,
+            session_id=session_id,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return {"job_id": job_id, "status": "pending"}
 
-@router.get("/{job_id}", response_model=StoryJobResponse)
-def get_job_status(job_id: str, db: Session = Depends(get_db)):
-    job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
-
-def process_story_job(job_id: str, theme: str):
-    db = SessionLocal()
-    try:
+@router.get("/{job_id}", response_model=dict)
+def get_job_status(
+    job_id: str
+):
+    logger.info(f"📋 Getting status for job {job_id}")
+    
+    if settings.USE_TURSO:
+        job = helpers.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        
+        db = next(get_db())
+        
         job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
         if not job:
-            return
+            raise HTTPException(status_code=404, detail="Job not found")
         
-        job.status = "processing"
-        db.commit()
-        
+        return {
+            "job_id": job.job_id,
+            "status": job.status,
+            "story_id": job.story_id,
+            "error": job.error,
+            "created_at": job.created_at,
+            "completed_at": job.completed_at
+        }
 
-        story = StoryGenerator.generate_story(db, job.session_id, theme)
+def process_story_job(job_id: str, theme: str, session_id: str, user_id: Optional[int] = None):
+    logger.info(f"🔄 Processing job {job_id}")
+    
+    if settings.USE_TURSO:
+        try:
+            helpers.update_job_status(job_id, "processing")
+            
+            # This would need to be implemented with your story generator
+            # For now, create a simple story
+            story_data = {
+                "title": f"Story about {theme}",
+                "content": f"This is a generated story about {theme}.",
+                "excerpt": f"A story about {theme}",
+                "user_id": user_id,
+                "is_published": True if user_id else False,
+                "story_type": "written"
+            }
+            
+            if user_id:
+                story = helpers.create_story(story_data, user_id)
+                story_id = story["id"] if story else None
+            else:
+                story_id = None
+            
+            result = f"Story ID: {story_id}" if story_id else "Story generated"
+            helpers.update_job_status(job_id, "completed", result)
+            
+        except Exception as e:
+            logger.error(f"Error processing job {job_id}: {e}")
+            helpers.update_job_status(job_id, "failed", str(e))
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        from models.story import Story
+        from db.database import SessionLocal
+        from core.story_generator import StoryGenerator
         
-        job.story_id = story.id
-        job.status = "completed"
-        job.completed_at = datetime.now()
-        db.commit()
-        
-    except Exception as e:
-        if job:
-            job.status = "failed"
-            job.error = str(e)
+        db = SessionLocal()
+        try:
+            job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
+            if not job:
+                return
+            
+            job.status = "processing"
+            db.commit()
+            
+            story = StoryGenerator.generate_story(db, session_id, theme)
+            
+            if user_id:
+                story.user_id = user_id
+                story.is_published = True
+                db.commit()
+            
+            job.story_id = story.id
+            job.status = "completed"
             job.completed_at = datetime.now()
             db.commit()
-    finally:
-        db.close()
+            
+        except Exception as e:
+            if job:
+                job.status = "failed"
+                job.error = str(e)
+                job.completed_at = datetime.now()
+                db.commit()
+        finally:
+            db.close()
+
+def get_current_user_optional():
+    """Dependency to get current user or None"""
+    from core.auth import get_current_user_optional as auth_get_current_user
+    return auth_get_current_user()

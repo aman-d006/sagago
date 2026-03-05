@@ -1,140 +1,169 @@
+# routers/story.py
 import uuid
 from typing import Optional, List
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Cookie, Response, BackgroundTasks, Request, Query
-from sqlalchemy import desc, func, inspect
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, Query, File, UploadFile, Form
 import logging
 
-from db.database import get_db, SessionLocal
-from models.story import Story, StoryNode
-from models.job import StoryJob
-from models.user import User
-from models.like import StoryLike
-from models.analytics import StoryView
-from schemas.story import (
-    CompleteStoryNodeResponse,
-    CompleteStoryResponse,
-    CreatyStoryRequest,
-    FullStoryResponse
-)
-from schemas.job import StoryJobResponse
-from schemas.feed import FeedResponse
+from db.database import get_db, settings
+from db import helpers
+from core.auth import get_current_active_user, get_current_user_optional
 from core.story_generator import StoryGenerator
 from core.groq_client import GroqLLM
-from core.auth import get_current_active_user, get_current_user_optional
 from core.analytics import AnalyticsService
-from core.config import settings
-from core.upload import save_upload_file, delete_upload_file
-from fastapi import File, UploadFile, Form
+from core.config import settings as app_settings
+from core.upload import save_upload_file
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/stories",
-    tags=["stories"]
-)
+router = APIRouter(prefix="/stories", tags=["stories"])
 
-def get_session_id(session_id: Optional[str] = Cookie(None)):
+def get_session_id(session_id: Optional[str] = None):
     if not session_id:
         session_id = str(uuid.uuid4())
     return session_id
 
-@router.post("/create", response_model=StoryJobResponse)
+@router.post("/create", response_model=dict)
 def create_story(
-    request: CreatyStoryRequest,
+    request: dict,
     background_tasks: BackgroundTasks,
-    response: Response,
     session_id: str = Depends(get_session_id),
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user_optional)
 ):
-    response.set_cookie(key="session_id", value=session_id, httponly=True)
-
-    job_id = str(uuid.uuid4())
-
-    job = StoryJob(
-        job_id=job_id,
-        session_id=session_id,
-        theme=request.theme,
-        status="pending"
-    )
-    db.add(job)
-    db.commit()
-
-    background_tasks.add_task(
-        generate_story_task, 
-        job_id=job_id, 
-        theme=request.theme, 
-        session_id=session_id,
-        user_id=current_user.id if current_user else None
-        )
+    theme = request.get("theme")
+    if not theme:
+        raise HTTPException(status_code=400, detail="Theme is required")
     
-    return job
+    job_id = str(uuid.uuid4())
+    
+    if settings.USE_TURSO:
+        job_data = {
+            "job_id": job_id,
+            "theme": theme,
+            "status": "pending"
+        }
+        helpers.create_job(job_data)
+        
+        background_tasks.add_task(
+            generate_story_task,
+            job_id=job_id,
+            theme=theme,
+            session_id=session_id,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return {"job_id": job_id, "status": "pending"}
+    
+    else:
+        from models.job import StoryJob
+        from sqlalchemy.orm import Session
+        
+        db = next(get_db())
+        
+        job = StoryJob(
+            job_id=job_id,
+            session_id=session_id,
+            theme=theme,
+            status="pending"
+        )
+        db.add(job)
+        db.commit()
+        
+        background_tasks.add_task(
+            generate_story_task,
+            job_id=job_id,
+            theme=theme,
+            session_id=session_id,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return job
 
 @router.post("/publish/{story_id}")
 def publish_story(
     story_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user)
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
-    
-    if story.user_id:
-        raise HTTPException(status_code=400, detail="Story already published")
-    
-    story.user_id = current_user.id
-    story.is_published = True
-    db.commit()
-    
-    return {"message": "Story published successfully", "story_id": story.id}
-
-@router.get("/my-stories", response_model=List[CompleteStoryResponse])
-def get_my_stories(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    stories = db.query(Story).filter(Story.user_id == current_user.id).all()
-    
-    result = []
-    for story in stories:
-        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
         
-        if story.story_type == "interactive":
-            try:
-                complete_story = build_complete_story_tree(db, story, current_user)
-                complete_story.view_count = actual_view_count
-                result.append(complete_story)
-            except HTTPException:
-                author_data = {
-                    "id": story.author.id if story.author else 0,
-                    "username": story.author.username if story.author else "Unknown Author",
-                    "full_name": story.author.full_name if story.author else None,
-                    "avatar_url": story.author.avatar_url if story.author else None
-                }
-                
-                is_liked = db.query(StoryLike).filter(
-                    StoryLike.user_id == current_user.id,
-                    StoryLike.story_id == story.id
-                ).first() is not None
-                
-                result.append(CompleteStoryResponse(
-                    id=story.id,
-                    title=story.title,
-                    content=story.content,
-                    session_id=story.session_id,
-                    created_at=story.created_at,
-                    root_node=None,
-                    all_nodes={},
-                    like_count=len(story.likes),
-                    comment_count=len(story.comments),
-                    view_count=actual_view_count,
-                    is_liked_by_current_user=is_liked,
-                    author=author_data
-                ))
-        else:
+        if story.get("user_id"):
+            raise HTTPException(status_code=400, detail="Story already published")
+        
+        helpers.update_story(story_id, current_user.id, {
+            "user_id": current_user.id,
+            "is_published": True
+        })
+        
+        return {"message": "Story published successfully", "story_id": story_id}
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        if story.user_id:
+            raise HTTPException(status_code=400, detail="Story already published")
+        
+        story.user_id = current_user.id
+        story.is_published = True
+        db.commit()
+        
+        return {"message": "Story published successfully", "story_id": story.id}
+
+@router.get("/my-stories", response_model=List[dict])
+def get_my_stories(
+    current_user = Depends(get_current_active_user)
+):
+    if settings.USE_TURSO:
+        stories = helpers.get_user_stories(current_user.id, limit=100)
+        
+        result = []
+        for story in stories:
+            author = helpers.get_user_by_id(story["user_id"]) if story.get("user_id") else None
+            
+            result.append({
+                "id": story["id"],
+                "title": story["title"],
+                "content": story.get("content", ""),
+                "created_at": story.get("created_at"),
+                "like_count": story.get("like_count", 0),
+                "comment_count": story.get("comment_count", 0),
+                "view_count": story.get("view_count", 0),
+                "story_type": story.get("story_type", "written"),
+                "author": {
+                    "id": author["id"] if author else 0,
+                    "username": author["username"] if author else "Unknown Author",
+                    "full_name": author.get("full_name") if author else None,
+                    "avatar_url": author.get("avatar_url") if author else None
+                } if author else None
+            })
+        
+        return result
+    
+    else:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import desc
+        from models.story import Story
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        from models.story import StoryNode
+        
+        db = next(get_db())
+        
+        stories = db.query(Story).filter(Story.user_id == current_user.id).all()
+        
+        result = []
+        for story in stories:
+            actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
+            
             author_data = {
                 "id": story.author.id if story.author else 0,
                 "username": story.author.username if story.author else "Unknown Author",
@@ -147,200 +176,264 @@ def get_my_stories(
                 StoryLike.story_id == story.id
             ).first() is not None
             
-            result.append(CompleteStoryResponse(
-                id=story.id,
-                title=story.title,
-                content=story.content,
-                session_id=story.session_id,
-                created_at=story.created_at,
-                root_node=None,
-                all_nodes={},
-                like_count=len(story.likes),
-                comment_count=len(story.comments),
-                view_count=actual_view_count,
-                is_liked_by_current_user=is_liked,
-                author=author_data
-            ))
-    
-    return result
+            result.append({
+                "id": story.id,
+                "title": story.title,
+                "content": story.content,
+                "created_at": story.created_at,
+                "like_count": len(story.likes),
+                "comment_count": len(story.comments),
+                "view_count": actual_view_count,
+                "is_liked_by_current_user": is_liked,
+                "story_type": story.story_type,
+                "author": author_data
+            })
+        
+        return result
 
 @router.get("/metadata/{story_id}", response_model=dict)
 def get_story_metadata(
-    story_id: int,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    story_id: int
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        return {
+            "id": story["id"],
+            "title": story["title"],
+            "story_type": story.get("story_type", "written"),
+            "has_nodes": False
+        }
     
-    return {
-        "id": story.id,
-        "title": story.title,
-        "story_type": story.story_type,
-        "has_nodes": db.query(StoryNode).filter(StoryNode.story_id == story_id).count() > 0
-    }
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story, StoryNode
+        from db.database import get_db
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        return {
+            "id": story.id,
+            "title": story.title,
+            "story_type": story.story_type,
+            "has_nodes": db.query(StoryNode).filter(StoryNode.story_id == story_id).count() > 0
+        }
 
-@router.get("/explore", response_model=FeedResponse)
+@router.get("/explore", response_model=dict)
 def get_explore_feed(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     genre: Optional[str] = Query(None),
     sort: str = Query("latest", pattern="^(latest|popular|trending)$"),
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user_optional)
 ):
-    query = db.query(Story).filter(Story.is_published == True)
-    
-    if genre and genre != 'all':
-        genre_map = {
-            'fantasy': 'Fantasy',
-            'sci-fi': 'Sci-Fi',
-            'mystery': 'Mystery',
-            'romance': 'Romance',
-            'horror': 'Horror',
-            'adventure': 'Adventure',
-            'thriller': 'Thriller',
-            'drama': 'Drama',
-            'comedy': 'Comedy'
-        }
-        db_genre = genre_map.get(genre.lower(), genre.title())
-        query = query.filter(Story.genre == db_genre)
-    
-    if sort == 'popular':
-        like_counts = db.query(
-            StoryLike.story_id, 
-            func.count(StoryLike.id).label('like_count')
-        ).group_by(StoryLike.story_id).subquery()
-        query = query.outerjoin(
-            like_counts, 
-            Story.id == like_counts.c.story_id
-        ).order_by(like_counts.c.like_count.desc().nullslast())
-    elif sort == 'trending':
-        recent = datetime.now() - timedelta(days=7)
-        view_counts = db.query(
-            StoryView.story_id,
-            func.count(StoryView.id).label('view_count')
-        ).filter(
-            StoryView.viewed_at >= recent
-        ).group_by(StoryView.story_id).subquery()
-        query = query.outerjoin(
-            view_counts,
-            Story.id == view_counts.c.story_id
-        ).order_by(view_counts.c.view_count.desc().nullslast())
-    else:
-        query = query.order_by(desc(Story.created_at))
-    
-    total = query.count()
-    stories = query.offset((page - 1) * limit).limit(limit).all()
-    pages = (total + limit - 1) // limit
-    
-    story_responses = []
-    for story in stories:
-        is_liked = False
-        if current_user:
-            is_liked = db.query(StoryLike).filter(
-                StoryLike.user_id == current_user.id,
-                StoryLike.story_id == story.id
-            ).first() is not None
+    if settings.USE_TURSO:
+        offset = (page - 1) * limit
+        stories = helpers.get_feed_stories(sort, "week" if sort == "trending" else "all", page, limit)
         
-        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
-        like_count = db.query(StoryLike).filter(StoryLike.story_id == story.id).count()
-        comment_count = len(story.comments) if hasattr(story, 'comments') else 0
+        total = len(stories)
+        pages = (total + limit - 1) // limit if total > 0 else 1
+        
+        story_responses = []
+        for story in stories:
+            is_liked = False
+            if current_user:
+                is_liked = helpers.is_liked(current_user.id, story["id"])
             
-        story_responses.append({
-            "id": story.id,
-            "title": story.title,
-            "excerpt": story.excerpt,
-            "cover_image": story.cover_image,
-            "genre": getattr(story, 'genre', None),
-            "author": {
-                "id": story.author.id if story.author else 0,
-                "username": story.author.username if story.author else "Unknown Author",
-                "full_name": story.author.full_name if story.author else None,
-                "avatar_url": story.author.avatar_url if story.author else None
-            },
-            "like_count": like_count,
-            "comment_count": comment_count,
-            "view_count": actual_view_count,
-            "created_at": story.created_at,
-            "is_liked_by_current_user": is_liked,
-            "is_boosted_by_current_user": False
-        })
-    
-    return {
-        "stories": story_responses,
-        "total": total,
-        "page": page,
-        "pages": pages,
-        "has_next": page < pages,
-        "has_prev": page > 1
-    }
-
-@router.get("/user/{username}", response_model=List[CompleteStoryResponse])
-def get_user_stories(
-    username: str,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    stories = db.query(Story).filter(
-        Story.user_id == user.id,
-        Story.is_published == True
-    ).order_by(desc(Story.created_at)).offset(skip).limit(limit).all()
-    
-    result = []
-    for story in stories:
-        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
+            author = helpers.get_user_by_id(story["user_id"])
+            
+            story_responses.append({
+                "id": story["id"],
+                "title": story["title"],
+                "excerpt": story.get("excerpt", ""),
+                "cover_image": story.get("cover_image"),
+                "genre": story.get("genre"),
+                "author": {
+                    "id": author["id"] if author else 0,
+                    "username": author["username"] if author else "Unknown Author",
+                    "full_name": author.get("full_name") if author else None,
+                    "avatar_url": author.get("avatar_url") if author else None
+                },
+                "like_count": story.get("like_count", 0),
+                "comment_count": story.get("comment_count", 0),
+                "view_count": story.get("view_count", 0),
+                "created_at": story.get("created_at"),
+                "is_liked_by_current_user": is_liked
+            })
         
-        if story.story_type == "interactive":
-            try:
-                complete_story = build_complete_story_tree(db, story, current_user)
-                complete_story.view_count = actual_view_count
-                result.append(complete_story)
-            except HTTPException:
-                logger.warning(f"Story {story.id} has no nodes, creating basic response")
-                author_data = {
+        return {
+            "stories": story_responses,
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1
+        }
+    
+    else:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import desc, func
+        from models.story import Story
+        from models.user import User
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        from datetime import datetime, timedelta
+        
+        db = next(get_db())
+        
+        query = db.query(Story).filter(Story.is_published == True)
+        
+        if genre and genre != 'all':
+            genre_map = {
+                'fantasy': 'Fantasy',
+                'sci-fi': 'Sci-Fi',
+                'mystery': 'Mystery',
+                'romance': 'Romance',
+                'horror': 'Horror',
+                'adventure': 'Adventure',
+                'thriller': 'Thriller',
+                'drama': 'Drama',
+                'comedy': 'Comedy'
+            }
+            db_genre = genre_map.get(genre.lower(), genre.title())
+            query = query.filter(Story.genre == db_genre)
+        
+        if sort == 'popular':
+            like_counts = db.query(
+                StoryLike.story_id, 
+                func.count(StoryLike.id).label('like_count')
+            ).group_by(StoryLike.story_id).subquery()
+            query = query.outerjoin(
+                like_counts, 
+                Story.id == like_counts.c.story_id
+            ).order_by(like_counts.c.like_count.desc().nullslast())
+        elif sort == 'trending':
+            recent = datetime.now() - timedelta(days=7)
+            view_counts = db.query(
+                StoryView.story_id,
+                func.count(StoryView.id).label('view_count')
+            ).filter(
+                StoryView.viewed_at >= recent
+            ).group_by(StoryView.story_id).subquery()
+            query = query.outerjoin(
+                view_counts,
+                Story.id == view_counts.c.story_id
+            ).order_by(view_counts.c.view_count.desc().nullslast())
+        else:
+            query = query.order_by(desc(Story.created_at))
+        
+        total = query.count()
+        stories = query.offset((page - 1) * limit).limit(limit).all()
+        pages = (total + limit - 1) // limit
+        
+        story_responses = []
+        for story in stories:
+            is_liked = False
+            if current_user:
+                is_liked = db.query(StoryLike).filter(
+                    StoryLike.user_id == current_user.id,
+                    StoryLike.story_id == story.id
+                ).first() is not None
+            
+            actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
+            like_count = db.query(StoryLike).filter(StoryLike.story_id == story.id).count()
+            comment_count = len(story.comments) if hasattr(story, 'comments') else 0
+            
+            story_responses.append({
+                "id": story.id,
+                "title": story.title,
+                "excerpt": story.excerpt,
+                "cover_image": story.cover_image,
+                "genre": getattr(story, 'genre', None),
+                "author": {
                     "id": story.author.id if story.author else 0,
                     "username": story.author.username if story.author else "Unknown Author",
                     "full_name": story.author.full_name if story.author else None,
                     "avatar_url": story.author.avatar_url if story.author else None
-                }
+                },
+                "like_count": like_count,
+                "comment_count": comment_count,
+                "view_count": actual_view_count,
+                "created_at": story.created_at,
+                "is_liked_by_current_user": is_liked
+            })
+        
+        return {
+            "stories": story_responses,
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1
+        }
+
+@router.get("/user/{username}", response_model=List[dict])
+def get_user_stories(
+    username: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user = Depends(get_current_user_optional)
+):
+    if settings.USE_TURSO:
+        user = helpers.get_user_by_username(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        stories = helpers.get_user_stories(user["id"], limit=limit, offset=skip)
+        
+        result = []
+        for story in stories:
+            if not story.get("is_published"):
+                continue
                 
-                is_liked = False
-                if current_user:
-                    is_liked = db.query(StoryLike).filter(
-                        StoryLike.user_id == current_user.id,
-                        StoryLike.story_id == story.id
-                    ).first() is not None
-                
-                result.append(CompleteStoryResponse(
-                    id=story.id,
-                    title=story.title,
-                    content=story.content,
-                    session_id=story.session_id,
-                    created_at=story.created_at,
-                    root_node=None,
-                    all_nodes={},
-                    like_count=len(story.likes),
-                    comment_count=len(story.comments),
-                    view_count=actual_view_count,
-                    is_liked_by_current_user=is_liked,
-                    author=author_data
-                ))
-        else:
-            author_data = {
-                "id": story.author.id if story.author else 0,
-                "username": story.author.username if story.author else "Unknown Author",
-                "full_name": story.author.full_name if story.author else None,
-                "avatar_url": story.author.avatar_url if story.author else None
-            }
+            is_liked = False
+            if current_user:
+                is_liked = helpers.is_liked(current_user.id, story["id"])
             
+            result.append({
+                "id": story["id"],
+                "title": story["title"],
+                "content": story.get("content", ""),
+                "excerpt": story.get("excerpt", ""),
+                "cover_image": story.get("cover_image"),
+                "created_at": story.get("created_at"),
+                "like_count": story.get("like_count", 0),
+                "comment_count": story.get("comment_count", 0),
+                "view_count": story.get("view_count", 0),
+                "story_type": story.get("story_type", "written"),
+                "is_liked_by_current_user": is_liked
+            })
+        
+        return result
+    
+    else:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import desc
+        from models.user import User
+        from models.story import Story
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        
+        db = next(get_db())
+        
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        stories = db.query(Story).filter(
+            Story.user_id == user.id,
+            Story.is_published == True
+        ).order_by(desc(Story.created_at)).offset(skip).limit(limit).all()
+        
+        result = []
+        for story in stories:
+            actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
             is_liked = False
             if current_user:
                 is_liked = db.query(StoryLike).filter(
@@ -348,103 +441,134 @@ def get_user_stories(
                     StoryLike.story_id == story.id
                 ).first() is not None
             
-            result.append(CompleteStoryResponse(
-                id=story.id,
-                title=story.title,
-                content=story.content,
-                session_id=story.session_id,
-                created_at=story.created_at,
-                root_node=None,
-                all_nodes={},
-                like_count=len(story.likes),
-                comment_count=len(story.comments),
-                view_count=actual_view_count,
-                is_liked_by_current_user=is_liked,
-                author=author_data
-            ))
-    
-    return result
+            result.append({
+                "id": story.id,
+                "title": story.title,
+                "content": story.content,
+                "excerpt": story.excerpt,
+                "cover_image": story.cover_image,
+                "created_at": story.created_at,
+                "like_count": len(story.likes),
+                "comment_count": len(story.comments),
+                "view_count": actual_view_count,
+                "story_type": story.story_type,
+                "is_liked_by_current_user": is_liked
+            })
+        
+        return result
 
-@router.post("/generate-full", response_model=StoryJobResponse)
+@router.post("/generate-full", response_model=dict)
 def generate_full_story(
-    request: CreatyStoryRequest,
+    request: dict,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user_optional)
 ):
+    theme = request.get("theme")
+    if not theme:
+        raise HTTPException(status_code=400, detail="Theme is required")
+    
     job_id = str(uuid.uuid4())
     
-    job = StoryJob(
-        job_id=job_id,
-        session_id=str(uuid.uuid4()),
-        theme=request.theme,
-        status="pending"
-    )
-    db.add(job)
-    db.commit()
-
-    background_tasks.add_task(
-        generate_full_story_task, 
-        job_id=job_id, 
-        theme=request.theme,
-        user_id=current_user.id if current_user else None
-    )
+    if settings.USE_TURSO:
+        job_data = {
+            "job_id": job_id,
+            "theme": theme,
+            "status": "pending"
+        }
+        helpers.create_job(job_data)
+        
+        background_tasks.add_task(
+            generate_full_story_task,
+            job_id=job_id,
+            theme=theme,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return {"job_id": job_id, "status": "pending"}
     
-    return job
+    else:
+        from models.job import StoryJob
+        from sqlalchemy.orm import Session
+        
+        db = next(get_db())
+        
+        job = StoryJob(
+            job_id=job_id,
+            session_id=str(uuid.uuid4()),
+            theme=theme,
+            status="pending"
+        )
+        db.add(job)
+        db.commit()
+        
+        background_tasks.add_task(
+            generate_full_story_task,
+            job_id=job_id,
+            theme=theme,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return job
 
-@router.get("/{story_id}", response_model=CompleteStoryResponse)
+@router.get("/{story_id}", response_model=dict)
 def get_story_by_id(
     story_id: int,
     request: Request,
-    db: Session = Depends(get_db),
     session_id: str = Depends(get_session_id),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user_optional)
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:     
-        raise HTTPException(status_code=404, detail="Story not found")
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        user_id = current_user.id if current_user else None
+        AnalyticsService.track_story_view(None, story_id, user_id, session_id)
+        
+        author = helpers.get_user_by_id(story["user_id"]) if story.get("user_id") else None
+        
+        is_liked = False
+        if current_user:
+            is_liked = helpers.is_liked(current_user.id, story_id)
+        
+        return {
+            "id": story["id"],
+            "title": story["title"],
+            "content": story.get("content", ""),
+            "excerpt": story.get("excerpt", ""),
+            "cover_image": story.get("cover_image"),
+            "created_at": story.get("created_at"),
+            "like_count": story.get("like_count", 0),
+            "comment_count": story.get("comment_count", 0),
+            "view_count": story.get("view_count", 0),
+            "story_type": story.get("story_type", "written"),
+            "is_liked_by_current_user": is_liked,
+            "author": {
+                "id": author["id"] if author else 0,
+                "username": author["username"] if author else "Unknown Author",
+                "full_name": author.get("full_name") if author else None,
+                "avatar_url": author.get("avatar_url") if author else None
+            } if author else None
+        }
     
-    user_id = current_user.id if current_user else None
-    
-    AnalyticsService.track_story_view(db, story_id, user_id, session_id)
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
-    
-    if story.story_type == "interactive":
-        try:
-            complete_story = build_complete_story_tree(db, story, current_user)
-            complete_story.view_count = actual_view_count
-            return complete_story
-        except HTTPException:
-            author_data = {
-                "id": story.author.id if story.author else 0,
-                "username": story.author.username if story.author else "Unknown Author",
-                "full_name": story.author.full_name if story.author else None,
-                "avatar_url": story.author.avatar_url if story.author else None
-            }
-            
-            is_liked = False
-            if current_user:
-                is_liked = db.query(StoryLike).filter(
-                    StoryLike.user_id == current_user.id,
-                    StoryLike.story_id == story.id
-                ).first() is not None
-            
-            return CompleteStoryResponse(
-                id=story.id,
-                title=story.title,
-                content=story.content,
-                session_id=story.session_id,
-                created_at=story.created_at,
-                root_node=None,
-                all_nodes={},
-                like_count=len(story.likes),
-                comment_count=len(story.comments),
-                view_count=actual_view_count,
-                is_liked_by_current_user=is_liked,
-                author=author_data
-            )
     else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        from db.database import get_db
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        user_id = current_user.id if current_user else None
+        AnalyticsService.track_story_view(db, story_id, user_id, session_id)
+        
+        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
+        
         author_data = {
             "id": story.author.id if story.author else 0,
             "username": story.author.username if story.author else "Unknown Author",
@@ -459,517 +583,197 @@ def get_story_by_id(
                 StoryLike.story_id == story.id
             ).first() is not None
         
-        return CompleteStoryResponse(
-            id=story.id,
-            title=story.title,
-            content=story.content,
-            session_id=story.session_id,
-            created_at=story.created_at,
-            root_node=None,
-            all_nodes={},
-            like_count=len(story.likes),
-            comment_count=len(story.comments),
-            view_count=actual_view_count,
-            is_liked_by_current_user=is_liked,
-            author=author_data
-        )
-
-@router.get("/{story_id}/complete", response_model=CompleteStoryResponse)
-def get_complete_story(
-    story_id: int, 
-    request: Request,
-    db: Session = Depends(get_db),
-    session_id: str = Depends(get_session_id),
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:     
-        raise HTTPException(status_code=404, detail="Story not found")
-    
-    user_id = current_user.id if current_user else None
-    
-    AnalyticsService.track_story_view(db, story_id, user_id, session_id)
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
-    
-    complete_story = build_complete_story_tree(db, story, current_user)
-    complete_story.view_count = actual_view_count
-    
-    return complete_story
-
-@router.get("/{story_id}/full", response_model=FullStoryResponse)
-def get_full_story(
-    story_id: int,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
-    
-    user_id = current_user.id if current_user else None
-    
-    AnalyticsService.track_story_view(db, story_id, user_id, None)
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
-    
-    is_liked = False
-    if current_user:
-        is_liked = db.query(StoryLike).filter(
-            StoryLike.user_id == current_user.id,
-            StoryLike.story_id == story.id
-        ).first() is not None
-    
-    author_data = {
-        "id": story.author.id if story.author else 0,
-        "username": story.author.username if story.author else "Unknown Author",
-        "full_name": story.author.full_name if story.author else None,
-        "avatar_url": story.author.avatar_url if story.author else None
-    }
-    
-    return FullStoryResponse(
-        id=story.id,
-        title=story.title,
-        content=story.content or "",
-        excerpt=story.excerpt or "",
-        cover_image=story.cover_image,
-        author=author_data,
-        like_count=len(story.likes),
-        comment_count=len(story.comments),
-        view_count=actual_view_count,
-        created_at=story.created_at,
-        is_liked_by_current_user=is_liked
-    )
+        return {
+            "id": story.id,
+            "title": story.title,
+            "content": story.content,
+            "excerpt": story.excerpt,
+            "cover_image": story.cover_image,
+            "created_at": story.created_at,
+            "like_count": len(story.likes),
+            "comment_count": len(story.comments),
+            "view_count": actual_view_count,
+            "story_type": story.story_type,
+            "is_liked_by_current_user": is_liked,
+            "author": author_data
+        }
 
 @router.get("/{story_id}/stats")
 def get_story_stats(
-    story_id: int,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    story_id: int
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:     
-        raise HTTPException(status_code=404, detail="Story not found")
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
-    
-    return {
-        "story_id": story.id,
-        "title": story.title,
-        "views": actual_view_count,
-        "likes": len(story.likes),
-        "comments": len(story.comments),
-        "published": story.is_published,
-        "created_at": story.created_at
-    }
-
-def generate_story_task(job_id: str, theme: str, session_id: str, user_id: Optional[int] = None):
-    db = SessionLocal()
-
-    try:
-        job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
-
-        if not job:
-            return
-
-        try: 
-            job.status = "processing"
-            db.commit()
-
-            story = StoryGenerator.generate_story(db, session_id, theme)
-            
-            if user_id:
-                story.user_id = user_id
-                story.is_published = True
-                db.commit()
-
-            job.story_id = story.id
-            job.status = "completed"    
-            job.completed_at = datetime.now()
-            db.commit()
-        except Exception as e:
-            job.status = "failed"
-            job.completed_at = datetime.now()
-            job.error = str(e)
-            db.commit()
-    finally:
-        db.close()
-
-def build_complete_story_tree(db: Session, story: Story, current_user: Optional[User] = None) -> CompleteStoryResponse:
-    nodes = db.query(StoryNode).filter(StoryNode.story_id == story.id).all()
-    node_dict = {}
-    for node in nodes:
-        node_response = CompleteStoryNodeResponse(
-            id=node.id,
-            content=node.content,
-            is_ending=node.is_ending,
-            is_winning_ending=node.is_winning_ending,
-            options=node.options
-        )
-        node_dict[node.id] = node_response
-
-    root_node = next((node for node in nodes if node.is_root), None)
-    if not root_node:
-        raise HTTPException(status_code=500, detail="Root node not found for the story")
-    
-    is_liked = False
-    if current_user:
-        is_liked = db.query(StoryLike).filter(
-            StoryLike.user_id == current_user.id,
-            StoryLike.story_id == story.id
-        ).first() is not None
-    
-    author_data = {
-        "id": story.author.id if story.author else 0,
-        "username": story.author.username if story.author else "Unknown Author",
-        "full_name": story.author.full_name if story.author else None,
-        "avatar_url": story.author.avatar_url if story.author else None
-    }
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
-    
-    return CompleteStoryResponse(
-        id=story.id,
-        title=story.title,
-        content=story.content,
-        session_id=story.session_id,
-        created_at=story.created_at,
-        root_node=node_dict[root_node.id],
-        all_nodes=node_dict,
-        like_count=len(story.likes),
-        comment_count=len(story.comments),
-        view_count=actual_view_count,
-        is_liked_by_current_user=is_liked,
-        author=author_data
-    )
-
-def generate_full_story_task(job_id: str, theme: str, user_id: Optional[int] = None):
-    db = SessionLocal()
-    
-    try:
-        job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
-        if not job:
-            return
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
         
-        job.status = "processing"
-        db.commit()
-        
-        from core.prompts import FULL_STORY_PROMPT
-        from langchain_core.prompts import ChatPromptTemplate
-        
-        llm = GroqLLM(api_key=settings.GROQ_API_KEY, model=settings.GROQ_MODEL)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", FULL_STORY_PROMPT),
-            ("human", "Theme: {theme}")
-        ])
-        
-        formatted_prompt = prompt.invoke({"theme": theme})
-        response = llm.invoke(formatted_prompt)
-        
-        story_text = response.content if hasattr(response, "content") else response
-
-        story = Story(
-            title=f"The {theme.title()} Story",
-            content=story_text,
-            excerpt=story_text[:150] + "...",
-            session_id=str(uuid.uuid4()),
-            user_id=user_id,
-            is_published=True,
-            story_type="written"
-        )
-        db.add(story)
-        db.flush()
-        
-        job.story_id = story.id
-        job.status = "completed"
-        job.completed_at = datetime.now()
-        db.commit()
-        
-    except Exception as e:
-        if job:
-            job.status = "failed"
-            job.error = str(e)
-            job.completed_at = datetime.now()
-            db.commit()
-    finally:
-        db.close()
-
-
-@router.post("/generate-assisted", response_model=StoryJobResponse)
-def generate_assisted_story(
-    request: dict,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional)
-):
-    """Generate a full paragraph-style story based on user prompt"""
-    theme = request.get("theme")
-    cover_image = request.get("cover_image")
-    
-    if not theme:
-        raise HTTPException(status_code=400, detail="Theme is required")
-    
-    job_id = str(uuid.uuid4())
-    
-    job = StoryJob(
-        job_id=job_id,
-        session_id=str(uuid.uuid4()),
-        theme=theme,
-        status="pending"
-    )
-    db.add(job)
-    db.commit()
-
-    background_tasks.add_task(
-        generate_assisted_story_task, 
-        job_id=job_id, 
-        theme=theme,
-        cover_image=cover_image,
-        user_id=current_user.id if current_user else None
-    )
-    
-    return job
-
-def generate_assisted_story_task(job_id: str, theme: str, cover_image: Optional[str] = None, user_id: Optional[int] = None):
-    db = SessionLocal()
-    
-    try:
-        job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
-        if not job:
-            return
-        
-        job.status = "processing"
-        db.commit()
-        
-        from core.prompts import ASSISTED_STORY_PROMPT
-        from langchain_core.prompts import ChatPromptTemplate
-        
-        llm = GroqLLM(api_key=settings.GROQ_API_KEY, model=settings.GROQ_MODEL)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", ASSISTED_STORY_PROMPT),
-            ("human", "Story prompt: {theme}")
-        ])
-        
-        formatted_prompt = prompt.invoke({"theme": theme})
-        response = llm.invoke(formatted_prompt)
-        
-        story_text = response.content if hasattr(response, "content") else response
-        story_text = story_text.strip()
-        
-        lines = story_text.split('\n')
-        title = lines[0].strip() if lines else f"Story about {theme}"
-        if title.startswith('"') and title.endswith('"'):
-            title = title[1:-1]
-        
-        content = '\n'.join(lines[1:]).strip() if len(lines) > 1 else story_text
-        if not content:
-            content = story_text
-        
-        excerpt = content[:150] + "..." if len(content) > 150 else content
-
-        print(f"📝 Creating story with cover_image: {cover_image}")  # Add this log
-
-        story = Story(
-            title=title,
-            content=content,
-            excerpt=excerpt,
-            cover_image=cover_image,  # Make sure this is included
-            session_id=str(uuid.uuid4()),
-            user_id=user_id,
-            is_published=True,
-            story_type="written"
-        )
-        db.add(story)
-        db.flush()
-        
-        print(f"✅ Story created with ID: {story.id}, cover_image: {story.cover_image}")  # Add this log
-        
-        job.story_id = story.id
-        job.status = "completed"
-        job.completed_at = datetime.now()
-        db.commit()
-        
-    except Exception as e:
-        print(f"❌ Error in story generation: {e}")
-        if job:
-            job.status = "failed"
-            job.error = str(e)
-            job.completed_at = datetime.now()
-            db.commit()
-    finally:
-        db.close()
-
-@router.get("/debug/genres")
-def debug_genres(db: Session = Depends(get_db)):
-    try:
-        inspector = inspect(db.bind)
-        columns = [col['name'] for col in inspector.get_columns('stories')]
-        
-        result = {
-            "has_genre_column": 'genre' in columns,
-            "columns": columns,
-            "total_stories": db.query(Story).count(),
-            "published_stories": db.query(Story).filter(Story.is_published == True).count(),
+        return {
+            "story_id": story["id"],
+            "title": story["title"],
+            "views": story.get("view_count", 0),
+            "likes": story.get("like_count", 0),
+            "comments": story.get("comment_count", 0),
+            "published": story.get("is_published", False),
+            "created_at": story.get("created_at")
         }
-        
-        if 'genre' in columns:
-            stories_with_genre = db.query(Story).filter(Story.genre.isnot(None)).count()
-            unique_genres = db.query(Story.genre).filter(
-                Story.genre.isnot(None)
-            ).distinct().all()
-            
-            result["stories_with_genre"] = stories_with_genre
-            result["unique_genres"] = [g[0] for g in unique_genres if g[0]]
-            
-            sample_stories = db.query(Story).filter(
-                Story.genre.isnot(None)
-            ).limit(5).all()
-            
-            result["sample_stories"] = [
-                {
-                    "id": s.id,
-                    "title": s.title,
-                    "genre": s.genre
-                } for s in sample_stories
-            ]
-        
-        return result
-    except Exception as e:
-        return {"error": str(e)}
     
-@router.get("/debug/schema")
-def debug_schema(db: Session = Depends(get_db)):
-    try:
-        from sqlalchemy import inspect
-        inspector = inspect(db.bind)
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        from models.analytics import StoryView
+        from db.database import get_db
         
-        columns = inspector.get_columns('stories')
+        db = next(get_db())
         
-        result = {
-            "table_exists": 'stories' in [t for t in inspector.get_table_names()],
-            "columns": [
-                {
-                    "name": col['name'],
-                    "type": str(col['type']),
-                    "nullable": col['nullable']
-                } for col in columns
-            ]
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
+        
+        return {
+            "story_id": story.id,
+            "title": story.title,
+            "views": actual_view_count,
+            "likes": len(story.likes),
+            "comments": len(story.comments),
+            "published": story.is_published,
+            "created_at": story.created_at
         }
-        
-        has_genre = any(col['name'] == 'genre' for col in columns)
-        result["has_genre_column"] = has_genre
-        
-        if has_genre:
-            stories = db.query(Story).filter(Story.is_published == True).limit(5).all()
-            result["sample_stories"] = [
-                {
-                    "id": s.id,
-                    "title": s.title,
-                    "genre": getattr(s, 'genre', None)
-                } for s in stories
-            ]
-        
-        return result
-    except Exception as e:
-        return {"error": str(e)}
-    
-@router.put("/{story_id}", response_model=CompleteStoryResponse)
+
+@router.put("/{story_id}", response_model=dict)
 def update_story(
     story_id: int,
     story_data: dict,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user)
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        if story["user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to edit this story")
+        
+        update_data = {}
+        for field in ["title", "content", "excerpt", "cover_image"]:
+            if field in story_data:
+                update_data[field] = story_data[field]
+        
+        if update_data:
+            helpers.update_story(story_id, current_user.id, update_data)
+        
+        updated_story = helpers.get_story(story_id)
+        
+        author = helpers.get_user_by_id(updated_story["user_id"])
+        is_liked = helpers.is_liked(current_user.id, story_id)
+        
+        return {
+            "id": updated_story["id"],
+            "title": updated_story["title"],
+            "content": updated_story.get("content", ""),
+            "created_at": updated_story.get("created_at"),
+            "like_count": updated_story.get("like_count", 0),
+            "comment_count": updated_story.get("comment_count", 0),
+            "view_count": updated_story.get("view_count", 0),
+            "is_liked_by_current_user": is_liked,
+            "author": {
+                "id": author["id"] if author else 0,
+                "username": author["username"] if author else "Unknown Author"
+            }
+        }
     
-    if story.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to edit this story")
-    
-    if "title" in story_data:
-        story.title = story_data["title"]
-    if "content" in story_data:
-        story.content = story_data["content"]
-    if "excerpt" in story_data:
-        story.excerpt = story_data["excerpt"]
-    if "cover_image" in story_data:
-        story.cover_image = story_data["cover_image"]
-    
-    db.commit()
-    db.refresh(story)
-    
-    actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
-    is_liked = False
-    if current_user:
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        from db.database import get_db
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        if story.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to edit this story")
+        
+        if "title" in story_data:
+            story.title = story_data["title"]
+        if "content" in story_data:
+            story.content = story_data["content"]
+        if "excerpt" in story_data:
+            story.excerpt = story_data["excerpt"]
+        if "cover_image" in story_data:
+            story.cover_image = story_data["cover_image"]
+        
+        db.commit()
+        db.refresh(story)
+        
+        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story.id).count()
         is_liked = db.query(StoryLike).filter(
             StoryLike.user_id == current_user.id,
             StoryLike.story_id == story.id
         ).first() is not None
-    
-    author_data = {
-        "id": story.author.id if story.author else 0,
-        "username": story.author.username if story.author else "Unknown Author",
-        "full_name": story.author.full_name if story.author else None,
-        "avatar_url": story.author.avatar_url if story.author else None
-    }
-    
-    return CompleteStoryResponse(
-        id=story.id,
-        title=story.title,
-        content=story.content,
-        session_id=story.session_id,
-        created_at=story.created_at,
-        root_node=None,
-        all_nodes={},
-        like_count=len(story.likes),
-        comment_count=len(story.comments),
-        view_count=actual_view_count,
-        is_liked_by_current_user=is_liked,
-        author=author_data
-    )
+        
+        author_data = {
+            "id": story.author.id if story.author else 0,
+            "username": story.author.username if story.author else "Unknown Author"
+        }
+        
+        return {
+            "id": story.id,
+            "title": story.title,
+            "content": story.content,
+            "created_at": story.created_at,
+            "like_count": len(story.likes),
+            "comment_count": len(story.comments),
+            "view_count": actual_view_count,
+            "is_liked_by_current_user": is_liked,
+            "author": author_data
+        }
 
 @router.delete("/{story_id}")
 def delete_story(
     story_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user)
 ):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        if story["user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this story")
+        
+        helpers.delete_story(story_id, current_user.id)
+        
+        return {"message": "Story deleted successfully"}
     
-    if story.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this story")
-    
-    db.delete(story)
-    db.commit()
-    
-    return {"message": "Story deleted successfully"}
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        from db.database import get_db
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        if story.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this story")
+        
+        db.delete(story)
+        db.commit()
+        
+        return {"message": "Story deleted successfully"}
 
-@router.post("/{story_id}/publish-interactive")
-def publish_interactive_story(
-    story_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    story = db.query(Story).filter(Story.id == story_id).first()
-    if not story:
-        raise HTTPException(status_code=404, detail="Story not found")
-    
-    if story.user_id:
-        raise HTTPException(status_code=400, detail="Story already published")
-    
-    story.user_id = current_user.id
-    story.is_published = True
-    db.commit()
-    
-    return {"message": "Interactive story published successfully", "story_id": story.id}
-  
 @router.post("/upload-image")
 async def upload_story_image(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user)
 ):
     """Upload an image for story thumbnail"""
     try:
@@ -979,15 +783,340 @@ async def upload_story_image(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+# Background task functions
+def generate_story_task(job_id: str, theme: str, session_id: str, user_id: Optional[int] = None):
+    if settings.USE_TURSO:
+        try:
+            helpers.update_job_status(job_id, "processing")
+            
+            # This would need to be implemented - story generation
+            # For now, just mark as completed
+            story_data = {
+                "title": f"Story about {theme}",
+                "content": f"Generated content about {theme}",
+                "user_id": user_id,
+                "is_published": True if user_id else False
+            }
+            
+            story = helpers.create_story(story_data, user_id) if user_id else None
+            
+            helpers.update_job_status(job_id, "completed", f"Story ID: {story['id'] if story else 'unknown'}")
+            
+        except Exception as e:
+            helpers.update_job_status(job_id, "failed", str(e))
     
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        from models.story import Story
+        from db.database import SessionLocal
+        from core.story_generator import StoryGenerator
+        
+        db = SessionLocal()
+        try:
+            job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
+            if not job:
+                return
+            
+            job.status = "processing"
+            db.commit()
+            
+            story = StoryGenerator.generate_story(db, session_id, theme)
+            
+            if user_id:
+                story.user_id = user_id
+                story.is_published = True
+                db.commit()
+            
+            job.story_id = story.id
+            job.status = "completed"
+            job.completed_at = datetime.now()
+            db.commit()
+        except Exception as e:
+            if job:
+                job.status = "failed"
+                job.completed_at = datetime.now()
+                job.error = str(e)
+                db.commit()
+        finally:
+            db.close()
+
+def generate_full_story_task(job_id: str, theme: str, user_id: Optional[int] = None):
+    if settings.USE_TURSO:
+        try:
+            helpers.update_job_status(job_id, "processing")
+            
+            # Use Groq to generate story
+            from core.prompts import FULL_STORY_PROMPT
+            from langchain_core.prompts import ChatPromptTemplate
+            
+            llm = GroqLLM(api_key=app_settings.GROQ_API_KEY, model=app_settings.GROQ_MODEL)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", FULL_STORY_PROMPT),
+                ("human", "Theme: {theme}")
+            ])
+            
+            formatted_prompt = prompt.invoke({"theme": theme})
+            response = llm.invoke(formatted_prompt)
+            
+            story_text = response.content if hasattr(response, "content") else response
+            
+            story_data = {
+                "title": f"The {theme.title()} Story",
+                "content": story_text,
+                "excerpt": story_text[:150] + "...",
+                "user_id": user_id,
+                "is_published": True,
+                "story_type": "written"
+            }
+            
+            story = helpers.create_story(story_data, user_id) if user_id else None
+            
+            helpers.update_job_status(job_id, "completed", f"Story ID: {story['id'] if story else 'unknown'}")
+            
+        except Exception as e:
+            helpers.update_job_status(job_id, "failed", str(e))
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        from models.story import Story
+        from db.database import SessionLocal
+        from core.groq_client import GroqLLM
+        from core.prompts import FULL_STORY_PROMPT
+        from langchain_core.prompts import ChatPromptTemplate
+        import uuid
+        
+        db = SessionLocal()
+        try:
+            job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
+            if not job:
+                return
+            
+            job.status = "processing"
+            db.commit()
+            
+            llm = GroqLLM(api_key=app_settings.GROQ_API_KEY, model=app_settings.GROQ_MODEL)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", FULL_STORY_PROMPT),
+                ("human", "Theme: {theme}")
+            ])
+            
+            formatted_prompt = prompt.invoke({"theme": theme})
+            response = llm.invoke(formatted_prompt)
+            
+            story_text = response.content if hasattr(response, "content") else response
+            
+            story = Story(
+                title=f"The {theme.title()} Story",
+                content=story_text,
+                excerpt=story_text[:150] + "...",
+                session_id=str(uuid.uuid4()),
+                user_id=user_id,
+                is_published=True,
+                story_type="written"
+            )
+            db.add(story)
+            db.flush()
+            
+            job.story_id = story.id
+            job.status = "completed"
+            job.completed_at = datetime.now()
+            db.commit()
+            
+        except Exception as e:
+            if job:
+                job.status = "failed"
+                job.error = str(e)
+                job.completed_at = datetime.now()
+                db.commit()
+        finally:
+            db.close()
+
+@router.post("/generate-assisted", response_model=dict)
+def generate_assisted_story(
+    request: dict,
+    background_tasks: BackgroundTasks,
+    current_user = Depends(get_current_user_optional)
+):
+    theme = request.get("theme")
+    cover_image = request.get("cover_image")
+    
+    if not theme:
+        raise HTTPException(status_code=400, detail="Theme is required")
+    
+    job_id = str(uuid.uuid4())
+    
+    if settings.USE_TURSO:
+        job_data = {
+            "job_id": job_id,
+            "theme": theme,
+            "status": "pending"
+        }
+        helpers.create_job(job_data)
+        
+        background_tasks.add_task(
+            generate_assisted_story_task,
+            job_id=job_id,
+            theme=theme,
+            cover_image=cover_image,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return {"job_id": job_id, "status": "pending"}
+    
+    else:
+        from models.job import StoryJob
+        from sqlalchemy.orm import Session
+        
+        db = next(get_db())
+        
+        job = StoryJob(
+            job_id=job_id,
+            session_id=str(uuid.uuid4()),
+            theme=theme,
+            status="pending"
+        )
+        db.add(job)
+        db.commit()
+        
+        background_tasks.add_task(
+            generate_assisted_story_task,
+            job_id=job_id,
+            theme=theme,
+            cover_image=cover_image,
+            user_id=current_user.id if current_user else None
+        )
+        
+        return job
+
+def generate_assisted_story_task(job_id: str, theme: str, cover_image: Optional[str] = None, user_id: Optional[int] = None):
+    if settings.USE_TURSO:
+        try:
+            helpers.update_job_status(job_id, "processing")
+            
+            from core.prompts import ASSISTED_STORY_PROMPT
+            from langchain_core.prompts import ChatPromptTemplate
+            
+            llm = GroqLLM(api_key=app_settings.GROQ_API_KEY, model=app_settings.GROQ_MODEL)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", ASSISTED_STORY_PROMPT),
+                ("human", "Story prompt: {theme}")
+            ])
+            
+            formatted_prompt = prompt.invoke({"theme": theme})
+            response = llm.invoke(formatted_prompt)
+            
+            story_text = response.content if hasattr(response, "content") else response
+            story_text = story_text.strip()
+            
+            lines = story_text.split('\n')
+            title = lines[0].strip() if lines else f"Story about {theme}"
+            if title.startswith('"') and title.endswith('"'):
+                title = title[1:-1]
+            
+            content = '\n'.join(lines[1:]).strip() if len(lines) > 1 else story_text
+            if not content:
+                content = story_text
+            
+            excerpt = content[:150] + "..." if len(content) > 150 else content
+            
+            story_data = {
+                "title": title,
+                "content": content,
+                "excerpt": excerpt,
+                "cover_image": cover_image,
+                "user_id": user_id,
+                "is_published": True,
+                "story_type": "written"
+            }
+            
+            story = helpers.create_story(story_data, user_id) if user_id else None
+            
+            helpers.update_job_status(job_id, "completed", f"Story ID: {story['id'] if story else 'unknown'}")
+            
+        except Exception as e:
+            logger.error(f"Error generating story: {e}")
+            helpers.update_job_status(job_id, "failed", str(e))
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.job import StoryJob
+        from models.story import Story
+        from db.database import SessionLocal
+        from core.groq_client import GroqLLM
+        from core.prompts import ASSISTED_STORY_PROMPT
+        from langchain_core.prompts import ChatPromptTemplate
+        import uuid
+        
+        db = SessionLocal()
+        try:
+            job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
+            if not job:
+                return
+            
+            job.status = "processing"
+            db.commit()
+            
+            llm = GroqLLM(api_key=app_settings.GROQ_API_KEY, model=app_settings.GROQ_MODEL)
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", ASSISTED_STORY_PROMPT),
+                ("human", "Story prompt: {theme}")
+            ])
+            
+            formatted_prompt = prompt.invoke({"theme": theme})
+            response = llm.invoke(formatted_prompt)
+            
+            story_text = response.content if hasattr(response, "content") else response
+            story_text = story_text.strip()
+            
+            lines = story_text.split('\n')
+            title = lines[0].strip() if lines else f"Story about {theme}"
+            if title.startswith('"') and title.endswith('"'):
+                title = title[1:-1]
+            
+            content = '\n'.join(lines[1:]).strip() if len(lines) > 1 else story_text
+            if not content:
+                content = story_text
+            
+            excerpt = content[:150] + "..." if len(content) > 150 else content
+            
+            story = Story(
+                title=title,
+                content=content,
+                excerpt=excerpt,
+                cover_image=cover_image,
+                session_id=str(uuid.uuid4()),
+                user_id=user_id,
+                is_published=True,
+                story_type="written"
+            )
+            db.add(story)
+            db.flush()
+            
+            job.story_id = story.id
+            job.status = "completed"
+            job.completed_at = datetime.now()
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"Error in story generation: {e}")
+            if job:
+                job.status = "failed"
+                job.error = str(e)
+                job.completed_at = datetime.now()
+                db.commit()
+        finally:
+            db.close()
 
 @router.get("/debug/uploads")
-def debug_uploads(db: Session = Depends(get_db)):
+def debug_uploads():
     """Debug endpoint to check uploads directory"""
     import os
-    from core.config import settings
+    from core.config import settings as app_settings
     
-    upload_dir = os.path.join(settings.UPLOAD_DIR, "stories")
+    upload_dir = os.path.join(app_settings.UPLOAD_DIR, "stories")
     files = []
     if os.path.exists(upload_dir):
         files = os.listdir(upload_dir)

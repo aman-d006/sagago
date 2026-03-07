@@ -20,31 +20,37 @@ def search_users(
     logger.info(f"Searching users with query: {q}")
     
     if settings.USE_TURSO:
-        users = helpers.search_users(q, limit)
-        
-        result = []
-        for user in users:
-            followers_count = helpers.get_followers_count(user["id"])
-            following_count = helpers.get_following_count(user["id"])
-            stories_count = len(helpers.get_user_stories(user["id"]))
+        try:
+            users = helpers.search_users(q, limit)
+            logger.info(f"Found {len(users)} users")
             
-            is_following = helpers.is_following(current_user.id, user["id"])
+            result = []
+            for user in users:
+                followers_count = helpers.get_followers_count(user["id"])
+                following_count = helpers.get_following_count(user["id"])
+                stories = helpers.get_user_stories(user["id"], limit=1)
+                stories_count = len(stories)
+                
+                is_following = helpers.is_following(current_user.id, user["id"])
+                
+                result.append({
+                    "id": user["id"],
+                    "username": user["username"],
+                    "email": user.get("email", ""),
+                    "full_name": user["full_name"],
+                    "avatar_url": user["avatar_url"],
+                    "bio": user.get("bio", ""),
+                    "created_at": user.get("created_at"),
+                    "followers_count": followers_count,
+                    "following_count": following_count,
+                    "stories_count": stories_count,
+                    "is_following": is_following
+                })
             
-            result.append({
-                "id": user["id"],
-                "username": user["username"],
-                "email": user["email"],
-                "full_name": user["full_name"],
-                "avatar_url": user["avatar_url"],
-                "bio": user.get("bio", ""),
-                "created_at": user.get("created_at"),
-                "followers_count": followers_count,
-                "following_count": following_count,
-                "stories_count": stories_count,
-                "is_following": is_following
-            })
-        
-        return result
+            return result
+        except Exception as e:
+            logger.error(f"Error in search_users: {e}")
+            return []
     
     else:
         from sqlalchemy.orm import Session
@@ -104,6 +110,7 @@ def search_users(
             })
         
         return result
+
 
 @router.get("/suggestions", response_model=List[dict])
 def get_follow_suggestions(

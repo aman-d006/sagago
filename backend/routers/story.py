@@ -941,24 +941,32 @@ def generate_assisted_story(
         raise HTTPException(status_code=400, detail="Theme is required")
     
     job_id = str(uuid.uuid4())
+    logger.info(f"Creating assisted story job {job_id} with theme: {theme[:50]}...")
     
     if settings.USE_TURSO:
-        job_data = {
-            "job_id": job_id,
-            "theme": theme,
-            "status": "pending"
-        }
-        helpers.create_job(job_data)
-        
-        background_tasks.add_task(
-            generate_assisted_story_task,
-            job_id=job_id,
-            theme=theme,
-            cover_image=cover_image,
-            user_id=current_user.id if current_user else None
-        )
-        
-        return {"job_id": job_id, "status": "pending"}
+        try:
+            job_data = {
+                "job_id": job_id,
+                "session_id": str(uuid.uuid4()),
+                "theme": theme,
+                "status": "pending"
+            }
+          
+            helpers.create_job(job_data)
+            
+            background_tasks.add_task(
+                generate_assisted_story_task,
+                job_id=job_id,
+                theme=theme,
+                cover_image=cover_image,
+                user_id=current_user.id if current_user else None
+            )
+            
+            return {"job_id": job_id, "status": "pending"}
+        except Exception as e:
+            logger.error(f"Error creating job: {e}")
+            return {"job_id": job_id, "status": "pending", "warning": str(e)}
+    
     
     else:
         from models.job import StoryJob

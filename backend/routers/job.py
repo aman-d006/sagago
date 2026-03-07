@@ -79,11 +79,24 @@ def get_job_status(
     logger.info(f"Getting status for job {job_id}")
     
     if settings.USE_TURSO:
-        job = helpers.get_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-        return job
-    
+        try:
+            job = helpers.get_job(job_id)
+            if not job:
+                # Return a default response instead of 404 to prevent frontend errors
+                return {
+                    "job_id": job_id,
+                    "status": "not_found",
+                    "message": "Job not found or expired"
+                }
+            return job
+        except Exception as e:
+            logger.error(f"Error getting job {job_id}: {e}")
+            return {
+                "job_id": job_id,
+                "status": "error",
+                "message": str(e)
+            }
+
     else:
         from sqlalchemy.orm import Session
         from models.job import StoryJob

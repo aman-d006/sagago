@@ -48,6 +48,19 @@ def create_turso_tables():
         """)
         
         client.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                theme TEXT,
+                status TEXT DEFAULT 'pending',
+                result TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME
+            )
+        """)
+        logger.info("✅ Jobs table created/verified in Turso")
+
+        client.execute("""
             CREATE TABLE IF NOT EXISTS stories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,

@@ -638,3 +638,47 @@ def get_favorite_templates(
             })
         
         return result
+    
+@router.get("/favorites", response_model=List[dict])
+def get_favorite_templates(
+    current_user = Depends(get_current_active_user)
+):
+    logger.info(f"Getting favorite templates for user {current_user.id}")
+    
+    if settings.USE_TURSO:
+        favorites = helpers.get_favorite_templates(current_user.id)
+        return favorites if favorites else []
+    
+    else:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import desc
+        from models.template import UserTemplate
+        
+        db = next(get_db())
+        
+        user_templates = db.query(UserTemplate).filter(
+            UserTemplate.user_id == current_user.id,
+            UserTemplate.is_favorite == True
+        ).order_by(desc(UserTemplate.last_used)).all()
+        
+        result = []
+        for ut in user_templates:
+            template = ut.template
+            result.append({
+                "id": template.id,
+                "title": template.title,
+                "description": template.description,
+                "genre": template.genre,
+                "content_structure": template.content_structure,
+                "prompt": template.prompt,
+                "cover_image": template.cover_image,
+                "is_premium": template.is_premium,
+                "usage_count": template.usage_count,
+                "created_by": template.created_by,
+                "created_at": template.created_at,
+                "updated_at": template.updated_at,
+                "creator_username": template.creator.username if template.creator else None,
+                "is_favorite": True
+            })
+        
+        return result

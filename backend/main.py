@@ -24,7 +24,6 @@ async def lifespan(app: FastAPI):
     logger.info("📊 Initializing database...")
     create_tables()
     
-    # Removed check_database() call
     logger.info("✅ Database is ready")
     logger.info("📝 Checking templates...")
     init_templates()
@@ -62,7 +61,7 @@ async def add_cors_headers(request, call_next):
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=ALLOWED_ORIGINS_LIST,
-    allow_origins=["https://sagago.vercel.app", "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["https://sagago.vercel.app", "http://localhost:5173", "http://localhost:3000", "https://sagago-7.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

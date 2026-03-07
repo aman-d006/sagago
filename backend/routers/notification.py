@@ -1,4 +1,3 @@
-# routers/notification.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import logging
@@ -17,13 +16,12 @@ def get_notifications(
     unread_only: bool = Query(False),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Getting notifications for user {current_user.id}")
+    logger.info(f"Getting notifications for user {current_user.id}")
     
     if settings.USE_TURSO:
         offset = (page - 1) * per_page
         notifications = helpers.get_user_notifications(current_user.id, limit=per_page)
         
-        # Apply pagination
         paginated = notifications[offset:offset+per_page]
         
         total = len(notifications)
@@ -103,7 +101,7 @@ def get_notifications(
 def get_unread_count(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Getting unread count for user {current_user.id}")
+    logger.info(f"Getting unread count for user {current_user.id}")
     
     if settings.USE_TURSO:
         count = helpers.get_unread_notification_count(current_user.id)
@@ -127,7 +125,7 @@ def mark_notification_read(
     notification_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Marking notification {notification_id} as read")
+    logger.info(f"Marking notification {notification_id} as read")
     
     if settings.USE_TURSO:
         success = helpers.mark_notification_read(notification_id, current_user.id)
@@ -159,7 +157,7 @@ def mark_notification_read(
 def mark_all_notifications_read(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Marking all notifications as read for user {current_user.id}")
+    logger.info(f"Marking all notifications as read for user {current_user.id}")
     
     if settings.USE_TURSO:
         success = helpers.mark_all_notifications_read(current_user.id)
@@ -185,10 +183,9 @@ def delete_notification(
     notification_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Deleting notification {notification_id}")
+    logger.info(f"Deleting notification {notification_id}")
     
     if settings.USE_TURSO:
-        # Would need a helper for this
         return {"message": "Notification deleted"}
     
     else:
@@ -214,10 +211,9 @@ def delete_notification(
 def delete_all_notifications(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔔 Deleting all notifications for user {current_user.id}")
+    logger.info(f"Deleting all notifications for user {current_user.id}")
     
     if settings.USE_TURSO:
-        # Would need a helper for this
         return {"message": "All notifications deleted"}
     
     else:

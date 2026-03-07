@@ -1,4 +1,3 @@
-# routers/feed.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -15,34 +14,28 @@ logger = logging.getLogger(__name__)
 def get_feed(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=50),
-    feed_type: str = Query("following", regex="^(following|popular|latest|trending)$"),
-    timeframe: str = Query("all", regex="^(today|week|month|all)$"),
+    feed_type: str = Query("following", pattern="^(following|popular|latest|trending)$"),
+    timeframe: str = Query("all", pattern="^(today|week|month|all)$"),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"📰 Getting {feed_type} feed for user {current_user.id}")
+    logger.info(f"Getting {feed_type} feed for user {current_user.id}")
     
     if settings.USE_TURSO:
         offset = (page - 1) * per_page
         
-        # Get following users
         following = helpers.get_following(current_user.id, limit=100)
         following_ids = [f["id"] for f in following]
         
-        # Get stories based on feed type
         stories = []
         if feed_type == "following":
-            # Get stories from followed users
             for user_id in following_ids:
                 user_stories = helpers.get_user_stories(user_id, limit=10)
                 stories.extend(user_stories)
         else:
-            # Get from general feed
             stories = helpers.get_feed_stories(feed_type, timeframe, page, per_page)
         
-        # Sort by created_at
         stories.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
         
-        # Apply pagination
         paginated = stories[offset:offset+per_page]
         total = len(stories)
         pages = (total + per_page - 1) // per_page
@@ -184,7 +177,7 @@ def get_following_feed(
     per_page: int = Query(20, ge=1, le=50),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"📰 Getting following feed for user {current_user.id}")
+    logger.info(f"Getting following feed for user {current_user.id}")
     
     if settings.USE_TURSO:
         offset = (page - 1) * per_page
@@ -299,10 +292,10 @@ def get_following_feed(
 def get_popular_feed(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=50),
-    timeframe: str = Query("week", regex="^(today|week|month|all)$"),
+    timeframe: str = Query("week", pattern="^(today|week|month|all)$"),
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"📰 Getting popular feed for timeframe {timeframe}")
+    logger.info(f"Getting popular feed for timeframe {timeframe}")
     
     if settings.USE_TURSO:
         stories = helpers.get_feed_stories("popular", timeframe, page, per_page)
@@ -424,7 +417,7 @@ def get_latest_feed(
     per_page: int = Query(20, ge=1, le=50),
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"📰 Getting latest feed")
+    logger.info(f"Getting latest feed")
     
     if settings.USE_TURSO:
         stories = helpers.get_feed_stories("latest", "all", page, per_page)

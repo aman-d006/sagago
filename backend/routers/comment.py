@@ -1,4 +1,3 @@
-# routers/comment.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import logging
@@ -23,28 +22,23 @@ def create_comment(
     if not content or not story_id:
         raise HTTPException(status_code=400, detail="Content and story_id are required")
     
-    logger.info(f"📝 Creating comment for story {story_id} by user {current_user.id}")
+    logger.info(f"Creating comment for story {story_id} by user {current_user.id}")
     
     if settings.USE_TURSO:
-        # Check if story exists
         story = helpers.get_story(story_id)
         if not story:
             raise HTTPException(status_code=404, detail="Story not found")
         
-        # Check if parent comment exists if provided
         if parent_id:
             parent = helpers.get_comment(parent_id)
             if not parent:
                 raise HTTPException(status_code=404, detail="Parent comment not found")
         
-        # Create comment
         comment = helpers.create_comment(story_id, current_user.id, content, parent_id)
         if not comment:
             raise HTTPException(status_code=500, detail="Failed to create comment")
         
-        # Create notifications
         if parent_id and parent:
-            # This is a reply to a comment
             if parent["user_id"] != current_user.id:
                 NotificationService.create_reply_notification(
                     db=None,
@@ -55,7 +49,6 @@ def create_comment(
                     reply_content=content
                 )
         else:
-            # This is a comment on a story
             if story["user_id"] and story["user_id"] != current_user.id:
                 NotificationService.create_comment_notification(
                     db=None,
@@ -96,7 +89,6 @@ def create_comment(
         db.commit()
         db.refresh(db_comment)
         
-        # Create notifications
         if parent_id and parent:
             if parent.user_id != current_user.id:
                 NotificationService.create_reply_notification(
@@ -147,7 +139,6 @@ def get_story_comments(
         
         comments = helpers.get_story_comments(story_id)
         
-        # Apply pagination
         paginated_comments = comments[skip:skip+limit]
         
         result = []
@@ -156,7 +147,6 @@ def get_story_comments(
             if current_user:
                 is_liked = helpers.is_comment_liked(current_user.id, comment["id"])
             
-            # Get replies count
             replies = helpers.get_comment_replies(comment["id"])
             
             result.append({

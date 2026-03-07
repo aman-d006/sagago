@@ -1,4 +1,3 @@
-# routers/analytics.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime, timedelta, date
@@ -12,7 +11,6 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 logger = logging.getLogger(__name__)
 
 def calculate_engagement_metrics(stories_data):
-    """Calculate engagement metrics from story data"""
     total_views = 0
     total_likes = 0
     total_comments = 0
@@ -56,28 +54,22 @@ def calculate_engagement_metrics(stories_data):
 def get_my_dashboard(
     current_user = Depends(get_current_active_user)
 ):
-    """Get analytics dashboard for current user"""
-    logger.info(f"📊 Getting dashboard for user {current_user.id}")
+    logger.info(f"Getting dashboard for user {current_user.id}")
     
     if settings.USE_TURSO:
-        # Get user's stories
         stories = helpers.get_user_stories(current_user.id, limit=100, offset=0)
         
-        # Get user stats
         followers_count = helpers.get_followers_count(current_user.id)
         following_count = helpers.get_following_count(current_user.id)
         
-        # Calculate metrics
         metrics = calculate_engagement_metrics(stories)
         total_views = metrics["total_views"]
         total_likes = metrics["total_likes"]
         total_comments = metrics["total_comments"]
         story_stats = metrics["story_stats"]
         
-        # Top stories
         top_stories = sorted(story_stats, key=lambda x: x['views'], reverse=True)[:5]
         
-        # Recent activity
         recent_views = 0
         recent_likes = 0
         recent_comments = 0
@@ -85,17 +77,20 @@ def get_my_dashboard(
         
         seven_days_ago = datetime.now() - timedelta(days=7)
         for story in stories:
-            if story.get('created_at') and datetime.fromisoformat(story['created_at'].replace('Z', '+00:00')) >= seven_days_ago:
-                recent_views += story.get('view_count', 0)
-                recent_likes += story.get('like_count', 0)
-                recent_comments += story.get('comment_count', 0)
+            if story.get('created_at'):
+                try:
+                    story_date = datetime.fromisoformat(story['created_at'].replace('Z', '+00:00'))
+                    if story_date >= seven_days_ago:
+                        recent_views += story.get('view_count', 0)
+                        recent_likes += story.get('like_count', 0)
+                        recent_comments += story.get('comment_count', 0)
+                except:
+                    pass
         
-        # Averages
         avg_views_per_story = total_views / len(stories) if stories else 0
         avg_likes_per_view = (total_likes / total_views * 100) if total_views > 0 else 0
         avg_comments_per_view = (total_comments / total_views * 100) if total_views > 0 else 0
         
-        # Get user details
         user = helpers.get_user_by_id(current_user.id)
         
         return {
@@ -286,11 +281,9 @@ def get_story_analytics(
     story_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    """Get analytics for a specific story"""
-    logger.info(f"📊 Getting analytics for story {story_id}")
+    logger.info(f"Getting analytics for story {story_id}")
     
     if settings.USE_TURSO:
-        # Check story ownership
         story = helpers.get_story(story_id)
         if not story:
             raise HTTPException(status_code=404, detail="Story not found")
@@ -298,7 +291,6 @@ def get_story_analytics(
         if story.get('user_id') != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized to view these analytics")
         
-        # Get analytics (would need a helper for this)
         total_views = story.get('view_count', 0)
         likes = story.get('like_count', 0)
         comments = story.get('comment_count', 0)
@@ -311,8 +303,8 @@ def get_story_analytics(
             "story_type": story.get('story_type'),
             "created_at": story.get('created_at'),
             "total_views": total_views,
-            "unique_viewers": 0,  # Would need tracking
-            "return_viewers": 0,   # Would need tracking
+            "unique_viewers": 0,
+            "return_viewers": 0,
             "likes": likes,
             "comments": comments,
             "engagement_rate": round(engagement_rate, 2),
@@ -392,8 +384,7 @@ def get_user_analytics(
     username: str,
     current_user = Depends(get_current_active_user)
 ):
-    """Get analytics for a user"""
-    logger.info(f"📊 Getting analytics for user {username}")
+    logger.info(f"Getting analytics for user {username}")
     
     if settings.USE_TURSO:
         user = helpers.get_user_by_username(username)
@@ -490,14 +481,12 @@ def get_user_analytics(
 def get_platform_overview(
     current_user = Depends(get_current_active_user)
 ):
-    """Get platform overview (admin only)"""
     if current_user.username != "admin" and (isinstance(current_user, dict) and current_user.get("username") != "admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    logger.info("📊 Getting platform overview")
+    logger.info("Getting platform overview")
     
     if settings.USE_TURSO:
-        # Would need platform stats helpers
         return {
             "total_users": 0,
             "total_stories": 0,
@@ -566,8 +555,7 @@ def get_trending_stories(
     days: int = Query(7, ge=1, le=30),
     limit: int = Query(10, ge=1, le=50)
 ):
-    """Get trending stories"""
-    logger.info(f"📊 Getting trending stories from last {days} days")
+    logger.info(f"Getting trending stories from last {days} days")
     
     if settings.USE_TURSO:
         stories = helpers.get_feed_stories("trending", "week", 1, limit)
@@ -635,11 +623,9 @@ def get_time_series_data(
     days: int = Query(30, ge=7, le=90),
     current_user = Depends(get_current_active_user)
 ):
-    """Get time series data for analytics"""
-    logger.info(f"📊 Getting time series data for last {days} days")
+    logger.info(f"Getting time series data for last {days} days")
     
     if settings.USE_TURSO:
-        # Would need time series helpers
         return {
             "labels": [],
             "views": [],
@@ -708,11 +694,10 @@ def get_time_series_data(
 
 @router.get("/stories/top", response_model=List[dict])
 def get_top_stories(
-    metric: str = Query("views", regex="^(views|likes|comments|engagement)$"),
+    metric: str = Query("views", pattern="^(views|likes|comments|engagement)$"),
     limit: int = Query(10, ge=1, le=50)
 ):
-    """Get top stories by various metrics"""
-    logger.info(f"📊 Getting top stories by {metric}")
+    logger.info(f"Getting top stories by {metric}")
     
     if settings.USE_TURSO:
         stories = helpers.get_feed_stories("popular", "all", 1, limit)

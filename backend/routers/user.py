@@ -1,4 +1,3 @@
-# routers/user.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import logging

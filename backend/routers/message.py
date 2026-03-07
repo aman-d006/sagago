@@ -1,4 +1,3 @@
-# routers/message.py
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from typing import List, Optional
 from datetime import datetime
@@ -61,7 +60,7 @@ def send_message(
     if current_user.id == receiver_id:
         raise HTTPException(status_code=400, detail="Cannot send message to yourself")
     
-    logger.info(f"💬 Sending message from user {current_user.id} to {receiver_id}")
+    logger.info(f"Sending message from user {current_user.id} to {receiver_id}")
     
     if settings.USE_TURSO:
         receiver = helpers.get_user_by_id(receiver_id)
@@ -72,7 +71,6 @@ def send_message(
         if not message:
             raise HTTPException(status_code=500, detail="Failed to send message")
         
-        # Send real-time notification
         import asyncio
         try:
             asyncio.create_task(manager.send_personal_message(
@@ -161,7 +159,7 @@ def send_message(
 def get_conversations(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💬 Getting conversations for user {current_user.id}")
+    logger.info(f"Getting conversations for user {current_user.id}")
     
     if settings.USE_TURSO:
         conversations = helpers.get_conversations(current_user.id)
@@ -215,7 +213,7 @@ def get_conversation(
     per_page: int = Query(50, ge=1, le=100),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💬 Getting conversation between {current_user.id} and {user_id}")
+    logger.info(f"Getting conversation between {current_user.id} and {user_id}")
     
     if settings.USE_TURSO:
         other_user = helpers.get_user_by_id(user_id)
@@ -227,7 +225,6 @@ def get_conversation(
         total = len(messages)
         pages = (total + per_page - 1) // per_page
         
-        # Mark as read
         helpers.mark_messages_read(current_user.id, user_id)
         
         return {
@@ -312,7 +309,7 @@ def get_conversation(
 def get_unread_count(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💬 Getting unread count for user {current_user.id}")
+    logger.info(f"Getting unread count for user {current_user.id}")
     
     if settings.USE_TURSO:
         unread_data = helpers.get_unread_count(current_user.id)
@@ -365,10 +362,9 @@ def get_unread_count(
 def mark_all_read(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💬 Marking all messages as read for user {current_user.id}")
+    logger.info(f"Marking all messages as read for user {current_user.id}")
     
     if settings.USE_TURSO:
-        # Would need a helper for this
         return {"message": "All messages marked as read", "marked_count": 0}
     
     else:
@@ -394,7 +390,7 @@ def mark_conversation_read(
     user_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💬 Marking conversation with {user_id} as read for user {current_user.id}")
+    logger.info(f"Marking conversation with {user_id} as read for user {current_user.id}")
     
     if settings.USE_TURSO:
         marked_count = helpers.mark_messages_read(current_user.id, user_id)

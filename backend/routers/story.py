@@ -1,4 +1,3 @@
-# routers/story.py
 import uuid
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -775,7 +774,6 @@ async def upload_story_image(
     file: UploadFile = File(...),
     current_user = Depends(get_current_active_user)
 ):
-    """Upload an image for story thumbnail"""
     try:
         file_url = await save_upload_file(file, "stories")
         return {"url": file_url, "message": "Image uploaded successfully"}
@@ -784,14 +782,11 @@ async def upload_story_image(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-# Background task functions
 def generate_story_task(job_id: str, theme: str, session_id: str, user_id: Optional[int] = None):
     if settings.USE_TURSO:
         try:
             helpers.update_job_status(job_id, "processing")
             
-            # This would need to be implemented - story generation
-            # For now, just mark as completed
             story_data = {
                 "title": f"Story about {theme}",
                 "content": f"Generated content about {theme}",
@@ -847,7 +842,6 @@ def generate_full_story_task(job_id: str, theme: str, user_id: Optional[int] = N
         try:
             helpers.update_job_status(job_id, "processing")
             
-            # Use Groq to generate story
             from core.prompts import FULL_STORY_PROMPT
             from langchain_core.prompts import ChatPromptTemplate
             
@@ -1112,7 +1106,6 @@ def generate_assisted_story_task(job_id: str, theme: str, cover_image: Optional[
 
 @router.get("/debug/uploads")
 def debug_uploads():
-    """Debug endpoint to check uploads directory"""
     import os
     from core.config import settings as app_settings
     

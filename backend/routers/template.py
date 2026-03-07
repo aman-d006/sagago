@@ -1,4 +1,3 @@
-# routers/template.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import random
@@ -12,7 +11,6 @@ from core.auth import get_current_active_user, get_current_user_optional
 router = APIRouter(prefix="/templates", tags=["templates"])
 logger = logging.getLogger(__name__)
 
-# Pre-defined templates for common genres
 DEFAULT_TEMPLATES = [
     {
         "title": "Hero's Journey Fantasy",
@@ -149,9 +147,7 @@ DEFAULT_TEMPLATES = [
 def create_default_templates(
     current_user = Depends(get_current_active_user)
 ):
-    """Create default templates (admin only)"""
     if settings.USE_TURSO:
-        # Check if user is admin
         if current_user.get("username") != "admin":
             raise HTTPException(status_code=403, detail="Admin access required")
         
@@ -196,7 +192,7 @@ def create_template(
     template_data: dict,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"📝 Creating template by user {current_user.id}")
+    logger.info(f"Creating template by user {current_user.id}")
     
     if settings.USE_TURSO:
         template_data["created_by"] = current_user.id
@@ -249,18 +245,16 @@ def get_templates(
     per_page: int = Query(20, ge=1, le=50),
     genre: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    sort: str = Query("popular", regex="^(popular|newest|title)$"),
+    sort: str = Query("popular", pattern="^(popular|newest|title)$"),
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"📋 Getting templates page {page}")
+    logger.info(f"Getting templates page {page}")
     
     if settings.USE_TURSO:
         offset = (page - 1) * per_page
         templates = helpers.get_templates(genre, search, sort, limit=per_page, offset=offset)
         
-        total = len(templates)  # This should be total count, but helpers need to return total
-        
-        # For now, just use templates length as total
+        total = len(templates)
         pages = (total + per_page - 1) // per_page if total > 0 else 1
         
         template_responses = []
@@ -344,7 +338,7 @@ def get_template(
     template_id: int,
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"📋 Getting template {template_id}")
+    logger.info(f"Getting template {template_id}")
     
     if settings.USE_TURSO:
         template = helpers.get_template(template_id)
@@ -394,7 +388,7 @@ def use_template(
     request: dict = None,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"📝 Using template {template_id} by user {current_user.id}")
+    logger.info(f"Using template {template_id} by user {current_user.id}")
     
     custom_title = None
     if request and isinstance(request, dict):
@@ -489,7 +483,7 @@ def toggle_favorite(
     template_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"⭐ Toggling favorite for template {template_id}")
+    logger.info(f"Toggling favorite for template {template_id}")
     
     if settings.USE_TURSO:
         result = helpers.toggle_template_favorite(template_id, current_user.id)
@@ -530,10 +524,9 @@ def toggle_favorite(
 def get_daily_prompt(
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"📝 Getting daily prompt")
+    logger.info(f"Getting daily prompt")
     
     if settings.USE_TURSO:
-        # Check if we have a prompt in DB
         prompts = [
             "Write a story about a character who finds a mysterious door that wasn't there yesterday.",
             "A letter arrives, addressed to you, but it's dated 100 years ago.",
@@ -606,7 +599,7 @@ def get_daily_prompt(
 def get_favorite_templates(
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"⭐ Getting favorite templates for user {current_user.id}")
+    logger.info(f"Getting favorite templates for user {current_user.id}")
     
     if settings.USE_TURSO:
         favorites = helpers.get_favorite_templates(current_user.id)

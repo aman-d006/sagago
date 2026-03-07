@@ -1,4 +1,3 @@
-# routers/like.py
 from fastapi import APIRouter, Depends, HTTPException
 import logging
 
@@ -15,7 +14,7 @@ def like_story(
     story_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"❤️ Like/unlike story {story_id} by user {current_user.id}")
+    logger.info(f"Like/unlike story {story_id} by user {current_user.id}")
     
     if settings.USE_TURSO:
         story = helpers.get_story(story_id)
@@ -24,7 +23,6 @@ def like_story(
         
         result = helpers.toggle_story_like(current_user.id, story_id)
         
-        # Create notification if liked
         if result["liked"] and story["user_id"] and story["user_id"] != current_user.id:
             NotificationService.create_like_notification(
                 db=None,

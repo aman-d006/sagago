@@ -144,6 +144,30 @@ async def health_check():
         "upload_dir": UPLOAD_DIR
     }
 
+@app.get("/api/monitor")
+async def monitor():
+    """Monitor database connections and performance"""
+    from db.database import get_turso_client
+    import time
+    
+    status = {
+        "turso_enabled": settings.USE_TURSO,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    if settings.USE_TURSO:
+        try:
+            start = time.time()
+            with get_turso_client() as client:
+                result = client.query("SELECT 1", [])
+            latency = (time.time() - start) * 1000
+            status["turso_status"] = "connected"
+            status["turso_latency_ms"] = round(latency, 2)
+        except Exception as e:
+            status["turso_status"] = f"error: {str(e)}"
+    
+    return status
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

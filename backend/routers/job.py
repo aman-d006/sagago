@@ -1,4 +1,3 @@
-# routers/job.py
 import uuid
 from typing import Optional
 from datetime import datetime
@@ -8,7 +7,7 @@ import logging
 from db.database import get_db, settings
 from db import helpers
 from core.story_generator import StoryGenerator
-from core.auth import get_current_user_optional  # Add this import!
+from core.auth import get_current_user_optional
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 def create_job(
     job_data: dict,
     background_tasks: BackgroundTasks,
-    current_user = Depends(get_current_user_optional)  # Now this will work
+    current_user = Depends(get_current_user_optional)
 ):
     theme = job_data.get("theme")
     if not theme:
@@ -26,7 +25,7 @@ def create_job(
     job_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
     
-    logger.info(f"📋 Creating job {job_id} with theme: {theme}")
+    logger.info(f"Creating job {job_id} with theme: {theme}")
     
     if settings.USE_TURSO:
         job = {
@@ -77,7 +76,7 @@ def create_job(
 def get_job_status(
     job_id: str
 ):
-    logger.info(f"📋 Getting status for job {job_id}")
+    logger.info(f"Getting status for job {job_id}")
     
     if settings.USE_TURSO:
         job = helpers.get_job(job_id)
@@ -105,14 +104,12 @@ def get_job_status(
         }
 
 def process_story_job(job_id: str, theme: str, session_id: str, user_id: Optional[int] = None):
-    logger.info(f"🔄 Processing job {job_id}")
+    logger.info(f"Processing job {job_id}")
     
     if settings.USE_TURSO:
         try:
             helpers.update_job_status(job_id, "processing")
             
-            # This would need to be implemented with your story generator
-            # For now, create a simple story
             story_data = {
                 "title": f"Story about {theme}",
                 "content": f"This is a generated story about {theme}.",
@@ -173,6 +170,5 @@ def process_story_job(job_id: str, theme: str, session_id: str, user_id: Optiona
             db.close()
 
 def get_current_user_optional():
-    """Dependency to get current user or None"""
     from core.auth import get_current_user_optional as auth_get_current_user
     return auth_get_current_user()

@@ -9,7 +9,6 @@ from core.auth import get_password_hash, verify_password, create_access_token, g
 router = APIRouter(prefix="/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
 
-
 @router.post("/register", response_model=dict)
 def register(
     email: str = Form(...),
@@ -21,7 +20,6 @@ def register(
     
     try:
         if settings.USE_TURSO:
-            # Check if user exists
             existing = helpers.get_user_by_username(username)
             if existing:
                 raise HTTPException(status_code=400, detail="Username already registered")
@@ -30,7 +28,6 @@ def register(
             if existing_email:
                 raise HTTPException(status_code=400, detail="Email already registered")
             
-            # Create user
             hashed_password = get_password_hash(password)
             user_data = {
                 "username": username,
@@ -48,7 +45,29 @@ def register(
             
             return user
         else:
-            pass
+            from sqlalchemy.orm import Session
+            from models.user import User
+            
+            db = next(get_db())
+            
+            db_user = db.query(User).filter(
+                (User.username == username) | (User.email == email)
+            ).first()
+            if db_user:
+                raise HTTPException(status_code=400, detail="Username or email already registered")
+            
+            hashed_password = get_password_hash(password)
+            db_user = User(
+                email=email,
+                username=username,
+                full_name=full_name,
+                hashed_password=hashed_password
+            )
+            db.add(db_user)
+            db.commit()
+            db.refresh(db_user)
+            
+            return db_user
     except HTTPException:
         raise
     except Exception as e:
@@ -56,67 +75,6 @@ def register(
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-# @router.post("/register", response_model=dict)
-# def register(
-#     email: str = Form(...),
-#     username: str = Form(...),
-#     password: str = Form(...),
-#     full_name: Optional[str] = Form(None)
-# ):
-#     logger.info(f"📝 Registering new user: {username}")
-    
-#     if settings.USE_TURSO:
-#         existing = helpers.get_user_by_username(username)
-#         if existing:
-#             raise HTTPException(status_code=400, detail="Username already registered")
-        
-#         existing_email = helpers.get_user_by_email(email)
-#         if existing_email:
-#             raise HTTPException(status_code=400, detail="Email already registered")
-        
-#         hashed_password = get_password_hash(password)
-#         user_data = {
-#             "username": username,
-#             "email": email,
-#             "full_name": full_name or username,
-#             "password_hash": hashed_password,
-#             "bio": "",
-#             "avatar_url": "",
-#             "is_active": True
-#         }
-        
-#         user = helpers.create_user(user_data)
-#         if not user:
-#             raise HTTPException(status_code=500, detail="Failed to create user")
-        
-#         logger.info(f"✅ User registered in Turso: {username}")
-#         return user
-    
-#     else:
-#         from sqlalchemy.orm import Session
-#         from models.user import User
-        
-#         db = next(get_db())
-        
-#         db_user = db.query(User).filter(
-#             (User.username == username) | (User.email == email)
-#         ).first()
-#         if db_user:
-#             raise HTTPException(status_code=400, detail="Username or email already registered")
-        
-#         hashed_password = get_password_hash(password)
-#         db_user = User(
-#             email=email,
-#             username=username,
-#             full_name=full_name,
-#             hashed_password=hashed_password
-#         )
-#         db.add(db_user)
-#         db.commit()
-#         db.refresh(db_user)
-        
-#         return db_user
 
 @router.post("/login", response_model=dict)
 def login(
@@ -184,6 +142,15 @@ def login(
 @router.get("/me", response_model=dict)
 def read_users_me(current_user = Depends(get_current_active_user)):
     if settings.USE_TURSO:
-        return current_user
+        return {
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "bio": current_user.bio,
+            "avatar_url": current_user.avatar_url,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at
+        }
     else:
         return current_user

@@ -1,4 +1,3 @@
-# db/turso_client.py
 import requests
 import json
 import logging
@@ -20,7 +19,6 @@ class TursoClient:
     def execute(self, sql: str, params: List[Any] = None):
         url = f"{self.base_url}/v2/pipeline"
         
-        # Log the raw params
         logger.info(f"Raw params in execute: {params}")
         
         formatted_params = []

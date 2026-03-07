@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import logging
+from datetime import datetime
 
 from db.database import get_db, settings
 from db import helpers
@@ -29,7 +30,6 @@ def add_bookmark(
         result = helpers.toggle_bookmark(current_user.id, story_id)
         
         if result.get("bookmarked"):
-            # Get story details for response
             story = helpers.get_story(story_id)
             author = helpers.get_user_by_id(story["user_id"]) if story.get("user_id") else None
             
@@ -37,7 +37,7 @@ def add_bookmark(
                 "id": story_id,
                 "user_id": current_user.id,
                 "story_id": story_id,
-                "created_at": datetime.now(),
+                "created_at": datetime.now().isoformat(),
                 "is_read": False,
                 "story_title": story.get("title"),
                 "story_excerpt": story.get("excerpt", ""),
@@ -52,7 +52,6 @@ def add_bookmark(
         from models.user import User
         from models.story import Story
         from models.bookmark import Bookmark
-        from datetime import datetime
         
         db = next(get_db())
         
@@ -211,13 +210,10 @@ def mark_as_read(
     logger.info(f"🔖 Marking bookmark as read for user {current_user.id}, story {story_id}")
     
     if settings.USE_TURSO:
-        # Check if bookmarked
         is_bookmarked = helpers.is_bookmarked(current_user.id, story_id)
         if not is_bookmarked:
             raise HTTPException(status_code=404, detail="Bookmark not found")
         
-        # Update in database would need a helper function
-        # For now, just return success
         return {"message": "Bookmark marked as read"}
     
     else:
@@ -251,7 +247,7 @@ def check_bookmark(
         
         return {
             "is_bookmarked": is_bookmarked,
-            "is_read": False  # Would need to fetch this if needed
+            "is_read": False
         }
     
     else:

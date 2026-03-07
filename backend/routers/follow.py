@@ -1,4 +1,3 @@
-# routers/follow.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 import logging
@@ -17,7 +16,7 @@ def follow_user(
     username: str,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"👤 Follow/unfollow: {current_user.username} -> {username}")
+    logger.info(f"Follow/unfollow: {current_user.username} -> {username}")
     
     if username == current_user.username:
         raise HTTPException(status_code=400, detail="You cannot follow yourself")
@@ -29,7 +28,6 @@ def follow_user(
         
         result = helpers.toggle_follow(current_user.id, user_to_follow["id"])
         
-        # Create notification if following
         if result["following"]:
             NotificationService.create_follow_notification(
                 db=None,
@@ -115,7 +113,7 @@ def get_followers(
     limit: int = Query(20, ge=1, le=100),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"👥 Getting followers for {username}")
+    logger.info(f"Getting followers for {username}")
     
     if settings.USE_TURSO:
         user = helpers.get_user_by_username(username)
@@ -124,7 +122,6 @@ def get_followers(
         
         followers = helpers.get_followers(user["id"], limit=limit)
         
-        # Apply skip for pagination
         paginated = followers[skip:skip+limit]
         
         result = []
@@ -192,7 +189,7 @@ def get_following(
     limit: int = Query(20, ge=1, le=100),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"👥 Getting users followed by {username}")
+    logger.info(f"Getting users followed by {username}")
     
     if settings.USE_TURSO:
         user = helpers.get_user_by_username(username)
@@ -201,7 +198,6 @@ def get_following(
         
         following = helpers.get_following(user["id"], limit=limit)
         
-        # Apply skip for pagination
         paginated = following[skip:skip+limit]
         
         result = []
@@ -267,7 +263,7 @@ def get_follow_stats(
     username: str,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"📊 Getting follow stats for {username}")
+    logger.info(f"Getting follow stats for {username}")
     
     if settings.USE_TURSO:
         user = helpers.get_user_by_username(username)
@@ -341,7 +337,7 @@ def get_follow_suggestions(
     limit: int = Query(10, ge=1, le=50),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"💡 Getting follow suggestions for {current_user.username}")
+    logger.info(f"Getting follow suggestions for {current_user.username}")
     
     if settings.USE_TURSO:
         suggestions = helpers.get_follow_suggestions(current_user.id, limit)

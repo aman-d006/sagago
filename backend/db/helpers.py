@@ -452,3 +452,57 @@ def get_template(template_id: int) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error in get_template: {e}")
         return None
+    
+    
+def get_feed_stories(feed_type: str, timeframe: str, page: int = 1, limit: int = 20) -> List[Dict]:
+    """Get stories for feed"""
+    if not settings.USE_TURSO:
+        return []
+    with get_turso_client() as client:
+        offset = (page - 1) * limit
+        
+        if feed_type == "trending":
+            time_filter = ""
+            if timeframe == "day":
+                time_filter = "AND s.created_at > datetime('now', '-1 day')"
+            elif timeframe == "week":
+                time_filter = "AND s.created_at > datetime('now', '-7 days')"
+            elif timeframe == "month":
+                time_filter = "AND s.created_at > datetime('now', '-30 days')"
+            
+            query = f"""
+                SELECT s.*, u.username, u.avatar_url,
+                       (s.view_count + s.like_count * 10) as score
+                FROM stories s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.is_published = 1 {time_filter}
+                ORDER BY score DESC
+                LIMIT ? OFFSET ?
+            """
+            rows = client.query(query, [limit, offset])
+            
+        elif feed_type == "latest":
+            rows = client.query(
+                """
+                SELECT s.*, u.username, u.avatar_url
+                FROM stories s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.is_published = 1
+                ORDER BY s.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [limit, offset]
+            )
+        else:
+            rows = client.query(
+                """
+                SELECT s.*, u.username, u.avatar_url
+                FROM stories s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.is_published = 1
+                ORDER BY (s.view_count + s.like_count * 10) DESC
+                LIMIT ? OFFSET ?
+                """,
+                [limit, offset]
+            )
+        return [story_to_dict(row) for row in rows]

@@ -27,6 +27,24 @@ class Settings(BaseSettings):
             return ",".join(v)
         return v
 
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        """Get the list of allowed origins"""
+     
+        base_origins = [
+            "https://sagago.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://sagago-7.onrender.com"
+        ]
+        
+        if self.ALLOWED_ORIGINS:
+            env_origins = [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+            base_origins.extend(env_origins)
+        
+      
+        return list(set(base_origins))
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -35,7 +53,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-ALLOWED_ORIGINS_LIST = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
+ALLOWED_ORIGINS_LIST = settings.allowed_origins_list
 
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(settings.UPLOAD_DIR, "stories"), exist_ok=True)

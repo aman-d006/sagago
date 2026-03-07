@@ -20,6 +20,25 @@ SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+class UserObject:
+    """Simple class to make dict users work like SQLAlchemy objects"""
+    def __init__(self, user_dict):
+        self.id = user_dict.get('id')
+        self.username = user_dict.get('username')
+        self.email = user_dict.get('email')
+        self.full_name = user_dict.get('full_name')
+        self.bio = user_dict.get('bio')
+        self.avatar_url = user_dict.get('avatar_url')
+        self.is_active = user_dict.get('is_active', True)
+        self.created_at = user_dict.get('created_at')
+    
+    def __getattr__(self, name):
+        return None
+    
+    def get(self, key, default=None):
+        """Dict-like get method for backward compatibility"""
+        return getattr(self, key, default)
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -54,14 +73,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     except JWTError as e:
         logger.error(f"JWT decode error: {e}")
         raise credentials_exception
-    
-    # Get user from Turso or SQLite
+  
     if db_settings.USE_TURSO:
-        user = helpers.get_user_by_username(username)
-        if user is None:
+        user_dict = helpers.get_user_by_username(username)
+        if user_dict is None:
             logger.warning(f"User not found in Turso: {username}")
             raise credentials_exception
-        logger.info(f"User found in Turso: {user.get('username')}")
+        
+        user = UserObject(user_dict)
+        logger.info(f"User found in Turso: {user.username}")
         return user
     else:
         user = db.query(User).filter(User.username == username).first()
@@ -84,9 +104,11 @@ async def get_current_user_optional(token: str = Depends(oauth2_scheme), db: Ses
     except JWTError:
         return None
     
-    # Get user from Turso or SQLite
     if db_settings.USE_TURSO:
-        return helpers.get_user_by_username(username)
+        user_dict = helpers.get_user_by_username(username)
+        if user_dict is None:
+            return None
+        return UserObject(user_dict)
     else:
         return db.query(User).filter(User.username == username).first()
 
@@ -98,10 +120,7 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Handle both dict (Turso) and object (SQLite)
-    is_active = current_user.get('is_active') if isinstance(current_user, dict) else current_user.is_active
-    
-    if not is_active:
+    if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     
     return current_user

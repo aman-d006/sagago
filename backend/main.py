@@ -4,10 +4,10 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 import logging
-
+from fastapi import Request
 from core.config import settings, ALLOWED_ORIGINS_LIST
 from routers import story, job, auth, like, comment, follow, feed, notification, analytics, user, bookmark, message, template
-from db.database import create_tables, engine  # Removed check_database
+from db.database import create_tables, engine
 from db.init_templates import init_templates
 
 logging.basicConfig(
@@ -45,28 +45,70 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-@app.get("/api/debug-cors")
-async def debug_cors():
-    return {"message": "CORS is working!", "origins": ALLOWED_ORIGINS_LIST}
+@app.options("/{rest_of_path:path}")
+async def preflight_handler():
+    return {}
 
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "https://sagago.vercel.app"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, *"
+    
+    origin = request.headers.get("origin")
+    
+ 
+    allowed_origins = [
+        "https://sagago.vercel.app",
+        "http://localhost:5173", 
+        "http://localhost:3000",
+        "https://sagago-7.onrender.com"
+    ]
+    
+  
+    if origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Type"
+        response.headers["Access-Control-Max-Age"] = "3600"
+    
     return response
 
+# Standard CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=ALLOWED_ORIGINS_LIST,
-    allow_origins=["https://sagago.vercel.app", "http://localhost:5173", "http://localhost:3000", "https://sagago-7.onrender.com"],
+    allow_origins=[
+        "https://sagago.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://sagago-7.onrender.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Debug endpoint to verify CORS configuration
+@app.get("/api/debug-cors")
+async def debug_cors(request: Request):
+    origin = request.headers.get("origin")
+    return {
+        "message": "CORS endpoint is working",
+        "allowed_origins": [
+            "https://sagago.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://sagago-7.onrender.com"
+        ],
+        "request_origin": origin,
+        "cors_headers_set": origin in [
+            "https://sagago.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://sagago-7.onrender.com"
+        ]
+    }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, settings.UPLOAD_DIR)

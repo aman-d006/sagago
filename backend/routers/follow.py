@@ -3,13 +3,20 @@ from typing import List, Optional
 import logging
 from datetime import datetime
 
-from db.database import get_db, settings
+from db.database import get_db, get_turso_client, settings
 from db import helpers
 from core.auth import get_current_active_user
 from core.notifications import NotificationService
 
 router = APIRouter(prefix="/users", tags=["follows"])
 logger = logging.getLogger(__name__)
+
+def get_value(cell):
+    if cell is None:
+        return None
+    if isinstance(cell, dict):
+        return cell.get('value')
+    return cell
 
 @router.post("/{username}/follow", response_model=dict)
 def follow_user(
@@ -373,64 +380,118 @@ def get_follow_stats(
 
 @router.get("/suggestions", response_model=List[dict])
 def get_follow_suggestions(
-    limit: int = Query(5, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=50),
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"Getting follow suggestions for {current_user.username}")
+    logger.info(f"Getting follow suggestions for user {current_user.id}")
     
     try:
         if settings.USE_TURSO:
-            suggestions = helpers.get_follow_suggestions(current_user.id, limit)
-            
-            result = []
-            for user in suggestions:
-                full_user = helpers.get_user_by_id(user["id"])
+            with get_turso_client() as client:
+                user_id_str = str(current_user.id)
+                limit_str = str(limit)
+           
+                following_ids_query = client.query(
+                    f"SELECT followed_id FROM follows WHERE follower_id = {user_id_str} AND is_active = 1",
+                    []
+                )
                 
-                result.append({
-                    "id": user["id"],
-                    "user_id": user["id"],
-                    "username": user["username"],
-                    "full_name": user["full_name"],
-                    "avatar_url": user["avatar_url"],
-                    "bio": full_user.get("bio", "") if full_user else "",
-                    "followed_at": datetime.now().isoformat(),
-                    "is_following": False
-                })
-            
-            return result
+                following_ids = [str(helpers.get_value(row[0])) for row in following_ids_query] if following_ids_query else []
+           
+                exclude_ids = [user_id_str] + following_ids
+                exclude_clause = f"AND u.id NOT IN ({','.join(exclude_ids)})" if exclude_ids else ""
+          
+                suggestions_query = client.query(
+                    f"""
+                    SELECT 
+                        u.id, 
+                        u.username, 
+                        u.full_name, 
+                        u.avatar_url, 
+                        u.bio,
+                        COUNT(s.id) as story_count,
+                        (SELECT COUNT(*) FROM follows WHERE followed_id = u.id AND is_active = 1) as follower_count
+                    FROM users u
+                    LEFT JOIN stories s ON u.id = s.user_id AND s.is_published = 1
+                    WHERE u.is_active = 1
+                    {exclude_clause}
+                    GROUP BY u.id
+                    ORDER BY follower_count DESC, story_count DESC
+                    LIMIT {limit_str}
+                    """,
+                    []
+                )
+                
+                result = []
+                for row in suggestions_query:
+                    user_id_val = int(get_value(row[0])) if get_value(row[0]) else 0
+                    username_val = get_value(row[1]) or ""
+                    full_name_val = get_value(row[2]) or username_val
+                    avatar_url_val = get_value(row[3])
+                    bio_val = get_value(row[4]) or ""
+                    
+                    result.append({
+                        "id": user_id_val,
+                        "user_id": user_id_val,
+                        "username": username_val,
+                        "full_name": full_name_val,
+                        "avatar_url": avatar_url_val,
+                        "bio": bio_val,
+                        "followed_at": datetime.now().isoformat(),
+                        "is_following": False
+                    })
+                
+                logger.info(f"Found {len(result)} popular suggestions for user {current_user.id}")
+                return result
         
         else:
             from sqlalchemy.orm import Session
+            from sqlalchemy import func
             from models.user import User
             from models.follow import Follow
+            from models.story import Story
             
             db = next(get_db())
-            
+           
             following_ids = db.query(Follow.following_id).filter(
                 Follow.follower_id == current_user.id,
                 Follow.is_active == True
             ).subquery()
-            
-            suggestions = db.query(User).filter(
+
+            suggestions = db.query(
+                User,
+                func.count(Story.id).label('story_count'),
+                func.count(Follow.following_id).label('follower_count')
+            ).outerjoin(
+                Story, (Story.user_id == User.id) & (Story.is_published == True)
+            ).outerjoin(
+                Follow, (Follow.following_id == User.id) & (Follow.is_active == True)
+            ).filter(
                 User.id != current_user.id,
-                User.id.notin_(following_ids),
+                ~User.id.in_(following_ids),
                 User.is_active == True
-            ).order_by(User.created_at.desc()).limit(limit).all()
+            ).group_by(User.id).order_by(
+                func.count(Follow.following_id).desc(),
+                func.count(Story.id).desc()
+            ).limit(limit).all()
             
             result = []
-            for user in suggestions:
+            for user, story_count, follower_count in suggestions:
                 result.append({
                     "id": user.id,
                     "user_id": user.id,
                     "username": user.username,
-                    "full_name": user.full_name,
+                    "full_name": user.full_name or user.username,
                     "avatar_url": user.avatar_url,
-                    "bio": user.bio,
+                    "bio": user.bio or "",
                     "followed_at": datetime.now().isoformat(),
                     "is_following": False
                 })
             
             return result
+            
     except Exception as e:
         logger.error(f"Error in get_follow_suggestions: {e}")
-        return []  
+        import traceback
+        logger.error(traceback.format_exc())
+        return []

@@ -74,6 +74,20 @@ def create_turso_tables():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
+       
+       
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS story_views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                story_id INTEGER NOT NULL,
+                user_id INTEGER,
+                session_id TEXT,
+                viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+        logger.info("✅ Story views table created/verified in Turso")
 
         client.execute("""
             CREATE TABLE IF NOT EXISTS stories (

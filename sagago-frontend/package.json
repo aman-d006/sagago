@@ -2,7 +2,6 @@
   "name": "sagago-frontend",
   "private": true,
   "version": "0.0.0",
-  
   "scripts": {
     "dev": "cross-env VITE_API_URL=https://sagago-7.onrender.com/api VITE_IMAGE_BASE_URL=https://sagago-7.onrender.com vite",
     "build": "vite build",
@@ -14,6 +13,7 @@
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "react": "^19.2.0",
@@ -22,7 +22,7 @@
     "react-intersection-observer": "^10.0.3",
     "react-router-dom": "^7.13.1",
     "react-toastify": "^11.0.5",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.11",
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -242,21 +242,30 @@ def get_followers(user_id: int, limit: int = 20) -> List[Dict]:
         return []
 
 def get_follow_suggestions(user_id: int, limit: int = 10) -> List[Dict]:
+    """Get follow suggestions for a user"""
     if not settings.USE_TURSO:
         return []
     try:
         with get_turso_client() as client:
             user_id_str = str(user_id)
             limit_str = str(limit)
+            
+            following_ids_query = client.query(
+                f"SELECT followed_id FROM follows WHERE follower_id = {user_id_str} AND is_active = 1",
+                []
+            )
+            
+            following_ids = [str(get_value(row[0])) for row in following_ids_query] if following_ids_query else []
+       
+            exclude_ids = [user_id_str] + following_ids
+            exclude_clause = f"AND id NOT IN ({','.join(exclude_ids)})" if exclude_ids else ""
+      
             sql = f"""
-                SELECT u.id, u.username, u.full_name, u.avatar_url, u.bio
-                FROM users u
-                WHERE u.id != {user_id_str} 
-                AND u.id NOT IN (
-                    SELECT followed_id FROM follows WHERE follower_id = {user_id_str} AND is_active = 1
-                )
-                AND u.is_active = 1
-                ORDER BY u.created_at DESC
+                SELECT id, username, full_name, avatar_url, bio
+                FROM users
+                WHERE is_active = 1
+                {exclude_clause}
+                ORDER BY RANDOM()
                 LIMIT {limit_str}
             """
             rows = client.query(sql, [])

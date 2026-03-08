@@ -1279,3 +1279,100 @@ def debug_uploads():
         "files": files,
         "absolute_path": os.path.abspath(upload_dir)
     }
+
+@router.get("/{story_id}/full", response_model=dict)
+def get_full_story(
+    story_id: int,
+    current_user = Depends(get_current_user_optional)
+):
+    """Get full story details for reading"""
+    logger.info(f"Getting full story {story_id}")
+    
+    if settings.USE_TURSO:
+        story = helpers.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        user_id = current_user.id if current_user else None
+        AnalyticsService.track_story_view(None, story_id, user_id, str(uuid.uuid4()))
+       
+        author = helpers.get_user_by_id(story["user_id"]) if story.get("user_id") else None
+
+        is_liked = False
+        if current_user:
+            is_liked = helpers.is_liked(current_user.id, story_id)
+        
+        with get_turso_client() as client:
+            nodes = client.query(f"SELECT COUNT(*) FROM story_nodes WHERE story_id = {story_id}", [])
+            has_nodes = nodes and len(nodes) > 0 and int(get_value(nodes[0][0])) > 0
+        
+        return {
+            "id": story["id"],
+            "title": story["title"],
+            "content": story.get("content", ""),
+            "excerpt": story.get("excerpt", ""),
+            "cover_image": story.get("cover_image"),
+            "created_at": story.get("created_at"),
+            "like_count": story.get("like_count", 0),
+            "comment_count": story.get("comment_count", 0),
+            "view_count": story.get("view_count", 0) + 1,  # Increment for this view
+            "story_type": "interactive" if has_nodes else story.get("story_type", "written"),
+            "has_nodes": has_nodes,
+            "is_liked_by_current_user": is_liked,
+            "author": {
+                "id": author["id"] if author else 0,
+                "username": author["username"] if author else "Unknown Author",
+                "full_name": author.get("full_name") if author else None,
+                "avatar_url": author.get("avatar_url") if author else None
+            } if author else None
+        }
+    
+    else:
+        from sqlalchemy.orm import Session
+        from models.story import Story
+        from models.like import StoryLike
+        from models.analytics import StoryView
+        from models.story import StoryNode
+        from db.database import get_db
+        
+        db = next(get_db())
+        
+        story = db.query(Story).filter(Story.id == story_id).first()
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        
+        user_id = current_user.id if current_user else None
+        AnalyticsService.track_story_view(db, story_id, user_id, str(uuid.uuid4()))
+        
+        actual_view_count = db.query(StoryView).filter(StoryView.story_id == story_id).count()
+        has_nodes = db.query(StoryNode).filter(StoryNode.story_id == story_id).count() > 0
+        
+        author_data = {
+            "id": story.author.id if story.author else 0,
+            "username": story.author.username if story.author else "Unknown Author",
+            "full_name": story.author.full_name if story.author else None,
+            "avatar_url": story.author.avatar_url if story.author else None
+        }
+        
+        is_liked = False
+        if current_user:
+            is_liked = db.query(StoryLike).filter(
+                StoryLike.user_id == current_user.id,
+                StoryLike.story_id == story.id
+            ).first() is not None
+        
+        return {
+            "id": story.id,
+            "title": story.title,
+            "content": story.content,
+            "excerpt": story.excerpt,
+            "cover_image": story.cover_image,
+            "created_at": story.created_at,
+            "like_count": len(story.likes),
+            "comment_count": len(story.comments),
+            "view_count": actual_view_count + 1,
+            "story_type": "interactive" if has_nodes else story.story_type,
+            "has_nodes": has_nodes,
+            "is_liked_by_current_user": is_liked,
+            "author": author_data
+        }

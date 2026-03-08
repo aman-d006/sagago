@@ -18,7 +18,7 @@ import {
   X
 } from 'lucide-react'
 import { toast } from 'react-toastify'
-import { format } from 'date-fns'
+import { formatISTTime, formatISTTimeShort } from '../utils/dateUtils'
 
 const Messages = () => {
   const { user } = useAuthStore()
@@ -70,9 +70,10 @@ const Messages = () => {
   const fetchConversations = async () => {
     try {
       const data = await messagesApi.getConversations()
-      setConversations(data)
+      setConversations(data || [])
     } catch (error) {
       console.error('Failed to fetch conversations:', error)
+      setConversations([])
     } finally {
       setIsLoading(false)
     }
@@ -81,13 +82,15 @@ const Messages = () => {
   const fetchUnreadCounts = async () => {
     try {
       const data = await messagesApi.getUnreadCount()
-      setConversations(prev => prev.map(conv => {
-        const unreadData = data.conversations.find(c => c.user_id === conv.user_id)
-        return {
-          ...conv,
-          unread_count: unreadData?.unread_count || 0
-        }
-      }))
+      if (data?.conversations) {
+        setConversations(prev => prev.map(conv => {
+          const unreadData = data.conversations.find((c: any) => c.user_id === conv.user_id)
+          return {
+            ...conv,
+            unread_count: unreadData?.unread_count || 0
+          }
+        }))
+      }
     } catch (error) {
       console.error('Failed to fetch unread counts:', error)
     }
@@ -105,14 +108,16 @@ const Messages = () => {
     try {
       const data = await messagesApi.getConversation(selectedConversation.user_id, pageNum)
       
-      if (reset) {
-        setMessages(data.messages)
-        setPage(data.page)
-        setHasMore(data.page < data.pages)
-      } else {
-        setMessages(prev => [...data.messages, ...prev])
-        setPage(data.page)
-        setHasMore(data.page < data.pages)
+      if (data) {
+        if (reset) {
+          setMessages(data.messages || [])
+          setPage(data.page || 1)
+          setHasMore(data.page < data.pages)
+        } else {
+          setMessages(prev => [...(data.messages || []), ...prev])
+          setPage(data.page || 1)
+          setHasMore(data.page < data.pages)
+        }
       }
       
       if (reset) {
@@ -137,9 +142,7 @@ const Messages = () => {
         setSelectedConversation(existingConv)
         setShowMobileList(false)
       } else {
-        const userData = await usersApi.getUserByUsername(
-          (await usersApi.getUserById(userId)).username
-        )
+        const userData = await usersApi.getUserById(userId)
         const newConv: Conversation = {
           id: Date.now(),
           user_id: userId,
@@ -169,32 +172,34 @@ const Messages = () => {
         newMessage.trim()
       )
       
-      setMessages(prev => [...prev, message])
-      setNewMessage('')
-      scrollToBottom()
-      
-      setConversations(prev => {
-        const exists = prev.some(c => c.user_id === selectedConversation.user_id)
-        if (exists) {
-          return prev.map(conv => 
-            conv.user_id === selectedConversation.user_id
-              ? { ...conv, last_message: message.content, last_message_at: message.created_at }
-              : conv
-          )
-        } else {
-          const newConv: Conversation = {
-            id: Date.now(),
-            user_id: selectedConversation.user_id,
-            username: selectedConversation.username,
-            avatar_url: selectedConversation.avatar_url,
-            last_message: message.content,
-            last_message_at: message.created_at,
-            unread_count: 0,
-            is_online: selectedConversation.is_online
+      if (message) {
+        setMessages(prev => [...prev, message])
+        setNewMessage('')
+        scrollToBottom()
+        
+        setConversations(prev => {
+          const exists = prev.some(c => c.user_id === selectedConversation.user_id)
+          if (exists) {
+            return prev.map(conv => 
+              conv.user_id === selectedConversation.user_id
+                ? { ...conv, last_message: message.content, last_message_at: message.created_at }
+                : conv
+            )
+          } else {
+            const newConv: Conversation = {
+              id: Date.now(),
+              user_id: selectedConversation.user_id,
+              username: selectedConversation.username,
+              avatar_url: selectedConversation.avatar_url,
+              last_message: message.content,
+              last_message_at: message.created_at,
+              unread_count: 0,
+              is_online: selectedConversation.is_online
+            }
+            return [newConv, ...prev]
           }
-          return [newConv, ...prev]
-        }
-      })
+        })
+      }
     } catch (error) {
       toast.error('Failed to send message')
     } finally {
@@ -240,20 +245,6 @@ const Messages = () => {
     }
   }
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
-    
-    if (diffInHours < 24) {
-      return format(date, 'h:mm a')
-    } else if (diffInHours < 48) {
-      return 'Yesterday'
-    } else {
-      return format(date, 'MMM d')
-    }
-  }
-
   const getMessageStatus = (message: Message, index: number) => {
     if (message.sender_id !== user?.id) return null
     
@@ -276,7 +267,6 @@ const Messages = () => {
 
   return (
     <div className="h-[calc(100vh-4rem)] max-w-7xl mx-auto">
-      {/* New Message Modal */}
       {showNewMessageModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowNewMessageModal(false)} />
@@ -325,7 +315,7 @@ const Messages = () => {
                       />
                     ) : (
                       <span className="text-lg font-bold text-primary-600">
-                        {result.username.charAt(0).toUpperCase()}
+                        {result.username?.charAt(0).toUpperCase()}
                       </span>
                     )}
                   </div>
@@ -345,7 +335,6 @@ const Messages = () => {
       )}
 
       <div className="flex h-full bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {/* Conversations List */}
         <div className={`${showMobileList ? 'flex' : 'hidden'} md:flex w-full md:w-80 border-r border-gray-200 flex-col`}>
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center justify-between mb-4">
@@ -403,11 +392,10 @@ const Messages = () => {
                           />
                         ) : (
                           <span className="text-lg font-bold text-primary-600">
-                            {conv.username.charAt(0).toUpperCase()}
+                            {conv.username?.charAt(0).toUpperCase()}
                           </span>
                         )}
                       </div>
-                      {/* Online status indicator removed */}
                     </div>
                     
                     <div className="flex-1 min-w-0">
@@ -416,10 +404,10 @@ const Messages = () => {
                           {conv.username}
                         </h3>
                         <span className="text-xs text-gray-500">
-                          {formatTime(conv.last_message_at)}
+                          {formatISTTimeShort(conv.last_message_at)}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-500 truncate">{conv.last_message}</p>
+                      <p className="text-sm text-gray-500 truncate">{conv.last_message || ''}</p>
                     </div>
                     
                     {conv.unread_count > 0 && (
@@ -434,11 +422,9 @@ const Messages = () => {
           </div>
         </div>
 
-        {/* Chat Area */}
         <div className={`${!showMobileList ? 'flex' : 'hidden'} md:flex flex-1 flex-col`}>
           {selectedConversation ? (
             <>
-              {/* Chat Header */}
               <div className="p-4 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <button
@@ -458,30 +444,26 @@ const Messages = () => {
                         />
                       ) : (
                         <span className="text-lg font-bold text-primary-600">
-                          {selectedConversation.username.charAt(0).toUpperCase()}
+                          {selectedConversation.username?.charAt(0).toUpperCase()}
                         </span>
                       )}
                     </div>
-                    {/* Online status indicator removed */}
                   </div>
                   
                   <div>
                     <h3 className="font-semibold text-gray-900">
                       {selectedConversation.username}
                     </h3>
-                    {/* Online/Offline text removed */}
                   </div>
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  {/* Phone and Video buttons removed */}
                   <button className="p-2 hover:bg-gray-100 rounded-full">
                     <Info className="w-5 h-5 text-gray-600" />
                   </button>
                 </div>
               </div>
 
-              {/* Messages */}
               <div
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
@@ -502,7 +484,7 @@ const Messages = () => {
                       {msg.sender_id !== user?.id && (
                         <div className="w-6 h-6 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
                           <span className="text-xs font-bold text-primary-600">
-                            {msg.sender_username.charAt(0).toUpperCase()}
+                            {msg.sender_username?.charAt(0).toUpperCase()}
                           </span>
                         </div>
                       )}
@@ -518,7 +500,7 @@ const Messages = () => {
                         <div className={`flex items-center justify-end space-x-1 mt-1 text-xs ${
                           msg.sender_id === user?.id ? 'text-primary-200' : 'text-gray-500'
                         }`}>
-                          <span>{format(new Date(msg.created_at), 'h:mm a')}</span>
+                          <span>{formatISTTime(msg.created_at)}</span>
                           {getMessageStatus(msg, index)}
                         </div>
                       </div>
@@ -528,7 +510,6 @@ const Messages = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Message Input */}
               <div className="p-4 border-t border-gray-200">
                 <div className="flex items-end space-x-2">
                   <textarea

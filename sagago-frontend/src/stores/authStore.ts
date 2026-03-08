@@ -55,6 +55,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       await useAuthStore.getState().fetchCurrentUser()
     } catch (error: any) {
       console.error('🔍 Login error:', error.response?.data || error.message)
+     
       throw error
     } finally {
       set({ isLoading: false })
@@ -73,15 +74,19 @@ export const useAuthStore = create<AuthState>((set) => ({
         formData.append('full_name', data.full_name)
       }
       
-      await apiClient.post('/auth/register', formData, {
+      const response = await apiClient.post('/auth/register', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       })
       
+      console.log('🔍 Registration response:', response.data)
+      
+    
       await useAuthStore.getState().login(data.username, data.password)
     } catch (error: any) {
       console.error('🔍 Registration error:', error.response?.data || error.message)
+    
       throw error
     } finally {
       set({ isLoading: false })
@@ -96,13 +101,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   fetchCurrentUser: async () => {
     try {
-      console.log('🔍 Fetching current user with token:', localStorage.getItem('token'))
+      const token = localStorage.getItem('token')
+      if (!token) return
+      
+      console.log('🔍 Fetching current user with token:', token)
       const response = await apiClient.get('/auth/me')
       console.log('🔍 User data received:', response.data)
       set({ user: response.data })
     } catch (error) {
       console.error('❌ Failed to fetch user:', error)
- 
       localStorage.removeItem('token')
       set({ token: null, user: null })
     }

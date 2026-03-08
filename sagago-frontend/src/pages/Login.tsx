@@ -7,19 +7,31 @@ import BackButton from '../components/ui/BackButton'
 const Login = () => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<{[key: string]: string}>({})
   const navigate = useNavigate()
   const { login, isLoading } = useAuthStore()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFieldErrors({})
+    
     try {
       await login(username, password)
       toast.success('Login successful!')
       navigate('/')
     } catch (error: any) {
       console.error('Login error:', error)
-      const errorMessage = error.response?.data?.detail || 'Login failed. Check your credentials.'
-      toast.error(errorMessage)
+      
+      const errorDetail = error.response?.data?.detail
+      
+      if (typeof errorDetail === 'string') {
+        toast.error(errorDetail)
+      } else if (errorDetail?.field && errorDetail?.message) {
+        setFieldErrors({ [errorDetail.field]: errorDetail.message })
+        toast.error(errorDetail.message)
+      } else {
+        toast.error('Login failed. Check your credentials.')
+      }
     }
   }
 
@@ -41,21 +53,33 @@ const Login = () => {
                 <input
                   type="text"
                   required
-                  className="input-field rounded-t-md"
-                  placeholder="Username"
+                  className={`input-field rounded-t-md ${fieldErrors.username ? 'border-red-500' : ''}`}
+                  placeholder="Username or Email"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value)
+                    setFieldErrors({})
+                  }}
                 />
+                {fieldErrors.username && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.username}</p>
+                )}
               </div>
               <div>
                 <input
                   type="password"
                   required
-                  className="input-field rounded-b-md"
+                  className={`input-field rounded-b-md ${fieldErrors.password ? 'border-red-500' : ''}`}
                   placeholder="Password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setFieldErrors({})
+                  }}
                 />
+                {fieldErrors.password && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.password}</p>
+                )}
               </div>
             </div>
 

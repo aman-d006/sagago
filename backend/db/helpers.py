@@ -1439,3 +1439,95 @@ def get_job(job_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error in get_job: {e}")
         return None
+
+def create_notification(user_id: int, type: str, content: str, related_id: Optional[int] = None) -> bool:
+    """Create a notification in Turso"""
+    if not settings.USE_TURSO:
+        return False
+    try:
+        with get_turso_client() as client:
+            user_id_str = str(user_id)
+            escaped_type = type.replace("'", "''")
+            escaped_content = content.replace("'", "''")
+            related_id_str = str(related_id) if related_id else "NULL"
+            
+            sql = f"""
+                INSERT INTO notifications (user_id, type, content, related_id, created_at)
+                VALUES ({user_id_str}, '{escaped_type}', '{escaped_content}', {related_id_str}, CURRENT_TIMESTAMP)
+            """
+            client.execute(sql, [])
+            return True
+    except Exception as e:
+        logger.error(f"Error in create_notification: {e}")
+        return False
+    
+def create_job(job_data: dict) -> Optional[Dict]:
+    """Create a background job"""
+    if not settings.USE_TURSO:
+        return None
+    try:
+        with get_turso_client() as client:
+            job_id = job_data['job_id'].replace("'", "''")
+            session_id = job_data.get('session_id', '').replace("'", "''")
+            theme = job_data.get('theme', '').replace("'", "''")
+            status = job_data.get('status', 'pending')
+            
+            sql = f"""
+                INSERT INTO jobs (job_id, session_id, theme, status, created_at)
+                VALUES ('{job_id}', '{session_id}', '{theme}', '{status}', CURRENT_TIMESTAMP)
+            """
+            client.execute(sql, [])
+            return get_job(job_data['job_id'])
+    except Exception as e:
+        logger.error(f"Error in create_job: {e}")
+        return {"job_id": job_data['job_id'], "status": job_data.get('status', 'pending')}
+
+def update_job_status(job_id: str, status: str, result: Optional[str] = None) -> bool:
+    """Update job status"""
+    if not settings.USE_TURSO:
+        return False
+    try:
+        with get_turso_client() as client:
+            job_id_escaped = job_id.replace("'", "''")
+            status_escaped = status
+            result_escaped = result.replace("'", "''") if result else ""
+            
+            if status in ['completed', 'failed']:
+                sql = f"""
+                    UPDATE jobs 
+                    SET status = '{status_escaped}', result = '{result_escaped}', completed_at = CURRENT_TIMESTAMP
+                    WHERE job_id = '{job_id_escaped}'
+                """
+            else:
+                sql = f"UPDATE jobs SET status = '{status_escaped}' WHERE job_id = '{job_id_escaped}'"
+            
+            client.execute(sql, [])
+            return True
+    except Exception as e:
+        logger.error(f"Error in update_job_status: {e}")
+        return False
+
+def get_job(job_id: str) -> Optional[Dict]:
+    """Get job by ID"""
+    if not settings.USE_TURSO:
+        return None
+    try:
+        with get_turso_client() as client:
+            job_id_escaped = job_id.replace("'", "''")
+            sql = f"SELECT * FROM jobs WHERE job_id = '{job_id_escaped}'"
+            rows = client.query(sql, [])
+            if rows and len(rows) > 0:
+                row = rows[0]
+                return {
+                    "job_id": get_value(row[0]),
+                    "session_id": get_value(row[1]) if len(row) > 1 else None,
+                    "theme": get_value(row[2]) if len(row) > 2 else None,
+                    "status": get_value(row[3]) if len(row) > 3 else None,
+                    "result": get_value(row[4]) if len(row) > 4 else None,
+                    "created_at": get_value(row[5]) if len(row) > 5 else None,
+                    "completed_at": get_value(row[6]) if len(row) > 6 else None
+                }
+            return None
+    except Exception as e:
+        logger.error(f"Error in get_job: {e}")
+        return None

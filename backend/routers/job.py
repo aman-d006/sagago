@@ -82,21 +82,28 @@ def get_job_status(
         try:
             job = helpers.get_job(job_id)
             if not job:
-                # Return a default response instead of 404 to prevent frontend errors
                 return {
                     "job_id": job_id,
-                    "status": "not_found",
-                    "message": "Job not found or expired"
+                    "status": "pending",
+                    "message": "Job is being processed"
                 }
+            
+            if job.get("status") == "completed" and job.get("result"):
+                result = job.get("result", "")
+                if "Story ID:" in result:
+                    story_id = result.replace("Story ID:", "").strip()
+                    if story_id and story_id != "unknown" and story_id.isdigit():
+                        job["story_id"] = int(story_id)
+            
             return job
         except Exception as e:
             logger.error(f"Error getting job {job_id}: {e}")
             return {
                 "job_id": job_id,
-                "status": "error",
-                "message": str(e)
+                "status": "pending",
+                "message": "Job is being processed"
             }
-
+    
     else:
         from sqlalchemy.orm import Session
         from models.job import StoryJob
@@ -105,7 +112,11 @@ def get_job_status(
         
         job = db.query(StoryJob).filter(StoryJob.job_id == job_id).first()
         if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
+            return {
+                "job_id": job_id,
+                "status": "pending",
+                "message": "Job is being processed"
+            }
         
         return {
             "job_id": job.job_id,

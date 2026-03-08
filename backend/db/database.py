@@ -1,3 +1,5 @@
+from xmlrpc import client
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -61,6 +63,19 @@ def create_turso_tables():
         logger.info("✅ Jobs table created/verified in Turso")
 
         client.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                related_id INTEGER,
+                is_read BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
+        client.execute("""
             CREATE TABLE IF NOT EXISTS stories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -81,6 +96,19 @@ def create_turso_tables():
             )
         """)
         
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                theme TEXT,
+                status TEXT DEFAULT 'pending',
+                result TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME
+            )
+        """)
+        logger.info("✅ Jobs table created/verified in Turso")
+
         client.execute("""
             CREATE TABLE IF NOT EXISTS story_nodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

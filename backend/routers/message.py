@@ -1,12 +1,39 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
+import pytz
 
 from db.database import get_db, settings
 from db import helpers
 from core.auth import get_current_active_user
+
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_ist_now():
+    return datetime.now(IST)
+
+def utc_to_ist(utc_dt):
+    if utc_dt.tzinfo is None:
+        utc_dt = pytz.UTC.localize(utc_dt)
+    return utc_dt.astimezone(IST)
+
+def format_ist_time(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    ist_dt = dt.astimezone(IST)
+    now = get_ist_now()
+    today = now.date()
+    yesterday = today - timedelta(days=1)
+    if ist_dt.date() == today:
+        return f"Today at {ist_dt.strftime('%I:%M %p')}"
+    elif ist_dt.date() == yesterday:
+        return f"Yesterday at {ist_dt.strftime('%I:%M %p')}"
+    else:
+        return ist_dt.strftime('%d %b %Y at %I:%M %p')
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger(__name__)
@@ -71,6 +98,14 @@ def send_message(
         if not message:
             raise HTTPException(status_code=500, detail="Failed to send message")
         
+        if message.get("created_at"):
+            try:
+                created_at = datetime.fromisoformat(message["created_at"].replace('Z', '+00:00'))
+                message["created_at_ist"] = format_ist_time(created_at)
+                message["display_time"] = format_ist_time(created_at)
+            except:
+                message["display_time"] = message["created_at"]
+        
         import asyncio
         try:
             asyncio.create_task(manager.send_personal_message(
@@ -89,7 +124,6 @@ def send_message(
         from sqlalchemy.orm import Session
         from models.user import User
         from models.message import Message, Conversation
-        from datetime import datetime
         
         db = next(get_db())
         
@@ -128,13 +162,17 @@ def send_message(
         db.commit()
         db.refresh(db_message)
         
+        ist_time = format_ist_time(db_message.created_at)
+        
         message_response = {
             "id": db_message.id,
             "sender_id": db_message.sender_id,
             "receiver_id": db_message.receiver_id,
             "content": db_message.content,
             "is_read": db_message.is_read,
-            "created_at": db_message.created_at,
+            "created_at": db_message.created_at.isoformat(),
+            "created_at_ist": ist_time,
+            "display_time": ist_time,
             "sender_username": current_user.username,
             "sender_avatar": current_user.avatar_url,
             "receiver_username": receiver.username,
@@ -163,6 +201,16 @@ def get_conversations(
     
     if settings.USE_TURSO:
         conversations = helpers.get_conversations(current_user.id)
+        
+        for conv in conversations:
+            if conv.get("last_message_at"):
+                try:
+                    last_msg_at = datetime.fromisoformat(conv["last_message_at"].replace('Z', '+00:00'))
+                    conv["last_message_at_ist"] = format_ist_time(last_msg_at)
+                    conv["display_time"] = format_ist_time(last_msg_at)
+                except:
+                    conv["display_time"] = conv["last_message_at"]
+        
         return conversations
     
     else:
@@ -193,13 +241,17 @@ def get_conversations(
             
             last_message = db.query(Message).filter(Message.id == conv.last_message_id).first()
             
+            ist_time = format_ist_time(conv.last_message_at)
+            
             result.append({
                 "id": conv.id,
                 "user_id": other_user.id,
                 "username": other_user.username,
                 "avatar_url": other_user.avatar_url,
                 "last_message": last_message.content if last_message else "",
-                "last_message_at": conv.last_message_at,
+                "last_message_at": conv.last_message_at.isoformat(),
+                "last_message_at_ist": ist_time,
+                "display_time": ist_time,
                 "unread_count": unread_count,
                 "is_online": other_user_id in manager.active_connections
             })
@@ -221,6 +273,15 @@ def get_conversation(
             raise HTTPException(status_code=404, detail="User not found")
         
         messages = helpers.get_conversation(current_user.id, user_id, limit=per_page)
+        
+        for msg in messages:
+            if msg.get("created_at"):
+                try:
+                    created_at = datetime.fromisoformat(msg["created_at"].replace('Z', '+00:00'))
+                    msg["created_at_ist"] = format_ist_time(created_at)
+                    msg["display_time"] = format_ist_time(created_at)
+                except:
+                    msg["display_time"] = msg["created_at"]
         
         total = len(messages)
         pages = (total + per_page - 1) // per_page
@@ -275,6 +336,7 @@ def get_conversation(
         
         message_responses = []
         for msg in messages:
+            ist_time = format_ist_time(msg.created_at)
             sender = msg.sender
             receiver = msg.receiver
             message_responses.append({
@@ -283,7 +345,9 @@ def get_conversation(
                 "receiver_id": msg.receiver_id,
                 "content": msg.content,
                 "is_read": msg.is_read,
-                "created_at": msg.created_at,
+                "created_at": msg.created_at.isoformat(),
+                "created_at_ist": ist_time,
+                "display_time": ist_time,
                 "sender_username": sender.username,
                 "sender_avatar": sender.avatar_url,
                 "receiver_username": receiver.username,

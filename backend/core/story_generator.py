@@ -17,9 +17,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class StoryGenerator:
-    # Constants for story generation
-    TARGET_NODES = 40  # Target 40 nodes for epic stories
-    MAX_DEPTH = 10      # Maximum depth of 10 levels
+
+    TARGET_NODES = 40 
+    MAX_DEPTH = 16    
     
     @classmethod
     def _get_llm(cls): 

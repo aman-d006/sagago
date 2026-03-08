@@ -1,6 +1,4 @@
-# core/prompts.py
-
-INTERACTIVE_STORY_PROMPT = """
+STORY_PROMPT = """
 You are an expert interactive fiction writer. Create a branching narrative story with multiple choices and endings based on this theme: {theme}
 
 Return a VALID JSON object with this exact structure:

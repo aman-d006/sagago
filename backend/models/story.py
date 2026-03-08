@@ -14,7 +14,7 @@ class Story(Base):
     cover_image = Column(String, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     session_id = Column(String, index=True)
-    story_type = Column(String, default="written")  
+    story_type = Column(String, default="written")
     genre = Column(String, nullable=True)
     view_count = Column(Integer, default=0)
     like_count = Column(Integer, default=0)
@@ -24,7 +24,6 @@ class Story(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-   
     author = relationship("User", back_populates="stories")
     nodes = relationship("StoryNode", back_populates="story", cascade="all, delete-orphan")
     likes = relationship("StoryLike", back_populates="story", cascade="all, delete-orphan")
@@ -44,15 +43,15 @@ class StoryNode(Base):
     is_winning_ending = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
- 
     story = relationship("Story", back_populates="nodes")
     outgoing_options = relationship("StoryOption", 
                                    foreign_keys="StoryOption.node_id",
                                    back_populates="node", 
-                                   cascade="all, delete-orphany")
+                                   cascade="all, delete-orphan")
     incoming_options = relationship("StoryOption",
                                    foreign_keys="StoryOption.next_node_id",
-                                   back_populates="next_node")
+                                   back_populates="next_node",
+                                   cascade="all, delete-orphan")
 
 class StoryOption(Base):
     __tablename__ = "story_options"
@@ -62,7 +61,7 @@ class StoryOption(Base):
     next_node_id = Column(Integer, ForeignKey("story_nodes.id", ondelete="CASCADE"))
     text = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-  
+    
     node = relationship("StoryNode", foreign_keys=[node_id], back_populates="outgoing_options")
     next_node = relationship("StoryNode", foreign_keys=[next_node_id], back_populates="incoming_options")
 
@@ -74,6 +73,6 @@ class StoryView(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     session_id = Column(String, nullable=True)
     viewed_at = Column(DateTime(timezone=True), server_default=func.now())
- 
+    
     story = relationship("Story", back_populates="views")
     user = relationship("User", back_populates="story_views")

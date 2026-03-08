@@ -1531,3 +1531,40 @@ def get_job(job_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error in get_job: {e}")
         return None
+    
+def get_favorite_templates(user_id: int) -> List[Dict]:
+    """Get favorite templates for a user"""
+    if not settings.USE_TURSO:
+        return []
+    try:
+        with get_turso_client() as client:
+            user_id_str = str(user_id)
+            sql = f"""
+                SELECT t.*, ut.last_used
+                FROM templates t
+                JOIN user_templates ut ON t.id = ut.template_id
+                WHERE ut.user_id = {user_id_str} AND ut.is_favorite = 1
+                ORDER BY ut.last_used DESC
+            """
+            rows = client.query(sql, [])
+            templates = []
+            for row in rows:
+                template_dict = {
+                    "id": int(get_value(row[0])) if get_value(row[0]) else None,
+                    "title": get_value(row[1]),
+                    "description": get_value(row[2]),
+                    "genre": get_value(row[3]),
+                    "content_structure": json.loads(get_value(row[4])) if get_value(row[4]) else {},
+                    "prompt": get_value(row[5]),
+                    "cover_image": get_value(row[6]),
+                    "is_premium": bool(int(get_value(row[7]))) if get_value(row[7]) else False,
+                    "usage_count": int(get_value(row[8])) if get_value(row[8]) else 0,
+                    "created_by": int(get_value(row[9])) if get_value(row[9]) else None,
+                    "created_at": get_value(row[10]),
+                    "is_favorite": True
+                }
+                templates.append(template_dict)
+            return templates
+    except Exception as e:
+        logger.error(f"Error in get_favorite_templates: {e}")
+        return []

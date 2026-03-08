@@ -646,8 +646,12 @@ def get_favorite_templates(
     logger.info(f"Getting favorite templates for user {current_user.id}")
     
     if settings.USE_TURSO:
-        favorites = helpers.get_favorite_templates(current_user.id)
-        return favorites if favorites else []
+        try:
+            favorites = helpers.get_favorite_templates(current_user.id)
+            return favorites if favorites else []
+        except Exception as e:
+            logger.error(f"Error getting favorites: {e}")
+            return []
     
     else:
         from sqlalchemy.orm import Session

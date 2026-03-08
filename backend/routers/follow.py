@@ -373,7 +373,7 @@ def get_follow_stats(
 
 @router.get("/suggestions", response_model=List[dict])
 def get_follow_suggestions(
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(5, ge=1, le=50),
     current_user = Depends(get_current_active_user)
 ):
     logger.info(f"Getting follow suggestions for {current_user.username}")
@@ -384,13 +384,15 @@ def get_follow_suggestions(
             
             result = []
             for user in suggestions:
+                full_user = helpers.get_user_by_id(user["id"])
+                
                 result.append({
                     "id": user["id"],
                     "user_id": user["id"],
                     "username": user["username"],
                     "full_name": user["full_name"],
                     "avatar_url": user["avatar_url"],
-                    "bio": user.get("bio", ""),
+                    "bio": full_user.get("bio", "") if full_user else "",
                     "followed_at": datetime.now().isoformat(),
                     "is_following": False
                 })
@@ -431,4 +433,4 @@ def get_follow_suggestions(
             return result
     except Exception as e:
         logger.error(f"Error in get_follow_suggestions: {e}")
-        return []
+        return []  

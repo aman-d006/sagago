@@ -1,130 +1,238 @@
-STORY_PROMPT = """
-Create an epic multi-level interactive story based on the theme: {theme}
+# core/prompts.py
 
-IMPORTANT: The story MUST have 8-10 levels of depth with multiple branching paths.
+INTERACTIVE_STORY_PROMPT = """
+You are an expert interactive fiction writer. Create a branching narrative story with multiple choices and endings based on this theme: {theme}
 
-Return ONLY a valid JSON object with this structure:
-{{
+Return a VALID JSON object with this exact structure:
+{
   "title": "Epic Story Title",
-  "rootNode": {{
-    "content": "Opening scene that sets the epic adventure... (3-4 sentences)",
-    "isEnding": false,
-    "isWinningEnding": false,
-    "options": [
-      {{
-        "text": "First major choice",
-        "nextNode": {{
-          "content": "Result of first choice leading deeper...",
-          "isEnding": false,
-          "isWinningEnding": false,
-          "options": [
-            {{
-              "text": "Sub-choice A",
-              "nextNode": {{
-                "content": "Deeper into the story...",
-                "isEnding": false,
-                "isWinningEnding": false,
-                "options": [
-                  {{
-                    "text": "Final choice path",
-                    "nextNode": {{
-                      "content": "Epic conclusion...",
-                      "isEnding": true,
-                      "isWinningEnding": true,
-                      "options": []
-                    }}
-                  }}
-                ]
-              }}
-            }},
-            {{
-              "text": "Sub-choice B",
-              "nextNode": {{
-                "content": "Alternative path...",
-                "isEnding": true,
-                "isWinningEnding": false,
-                "options": []
-              }}
-            }}
-          ]
-        }}
-      }},
-      {{
-        "text": "Second major choice",
-        "nextNode": {{
-          "content": "Result of second choice...",
-          "isEnding": false,
-          "isWinningEnding": false,
-          "options": [
-            {{
-              "text": "Branch 1",
-              "nextNode": {{
-                "content": "Continuing adventure...",
-                "isEnding": false,
-                "isWinningEnding": false,
-                "options": [
-                  {{
-                    "text": "Deep path",
-                    "nextNode": {{
-                      "content": "Final outcome...",
-                      "isEnding": true,
-                      "isWinningEnding": true,
-                      "options": []
-                    }}
-                  }}
-                ]
-              }}
-            }}
-          ]
-        }}
-      }},
-      {{
-        "text": "Third major choice",
-        "nextNode": {{
-          "content": "Mysterious path...",
-          "isEnding": false,
-          "isWinningEnding": false,
-          "options": [
-            {{
-              "text": "Explore deeper",
-              "nextNode": {{
-                "content": "More adventures...",
-                "isEnding": false,
-                "isWinningEnding": false,
-                "options": [
-                  {{
-                    "text": "Final choice",
-                    "nextNode": {{
-                      "content": "Conclusion...",
-                      "isEnding": true,
-                      "isWinningEnding": false,
-                      "options": []
-                    }}
-                  }}
-                ]
-              }}
-            }}
-          ]
-        }}
-      }}
-    ]
-  }}
-}}
+  "premise": "Brief story setup (2-3 sentences)",
+  "nodes": [
+    {
+      "id": 1,
+      "content": "The opening scene description (3-4 sentences)",
+      "is_root": true,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 2,
+          "text": "Choice A description"
+        },
+        {
+          "next_node_id": 3,
+          "text": "Choice B description"
+        },
+        {
+          "next_node_id": 4,
+          "text": "Choice C description"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "content": "Scene after choice A (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 5,
+          "text": "Sub-choice A1"
+        },
+        {
+          "next_node_id": 6,
+          "text": "Sub-choice A2"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "content": "Scene after choice B (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 7,
+          "text": "Sub-choice B1"
+        },
+        {
+          "next_node_id": 8,
+          "text": "Sub-choice B2"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "content": "Scene after choice C (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 9,
+          "text": "Sub-choice C1"
+        },
+        {
+          "next_node_id": 10,
+          "text": "Sub-choice C2"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "content": "Deeper into path A... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 11,
+          "text": "Final choice A1"
+        },
+        {
+          "next_node_id": 12,
+          "text": "Final choice A2"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "content": "Alternative path A2... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 13,
+          "text": "Final choice A3"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "content": "Path B1 unfolding... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 14,
+          "text": "Final choice B1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "content": "Path B2 leading to victory... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 15,
+          "text": "Claim victory"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "content": "Path C1... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 16,
+          "text": "Continue"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "content": "Path C2... (3-4 sentences)",
+      "is_root": false,
+      "is_ending": false,
+      "is_winning_ending": false,
+      "options": [
+        {
+          "next_node_id": 17,
+          "text": "Explore further"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "content": "You made it to the treasure room! The golden light illuminates ancient artifacts. You've succeeded where others failed.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": true,
+      "options": []
+    },
+    {
+      "id": 12,
+      "content": "The trap springs! You fall into a pit of spikes. Your adventure ends here.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": false,
+      "options": []
+    },
+    {
+      "id": 13,
+      "content": "You find a secret passage and escape with minor treasure. Not a complete victory, but you survive.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": false,
+      "options": []
+    },
+    {
+      "id": 14,
+      "content": "You defeat the dragon and become the hero of the kingdom! The king rewards you with half his wealth.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": true,
+      "options": []
+    },
+    {
+      "id": 15,
+      "content": "You claim the legendary sword and become the new ruler. Peace returns to the land.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": true,
+      "options": []
+    },
+    {
+      "id": 16,
+      "content": "You get lost in the caves and never find your way out. The darkness consumes you.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": false,
+      "options": []
+    },
+    {
+      "id": 17,
+      "content": "You discover ancient knowledge but are forever changed. You return home a different person.",
+      "is_root": false,
+      "is_ending": true,
+      "is_winning_ending": true,
+      "options": []
+    }
+  ]
+}
 
 Story Requirements:
 - Title must be epic and reflect the theme
-- Root node must have 3-4 distinct choices
-- Story depth: 8-10 levels (root → choices → sub-choices → deeper → ... → endings)
-- Each node (except endings) must have 2-3 choices
-- Include multiple endings (at least 4 winning, 4 losing)
-- Each node content: 3-5 sentences of rich, descriptive text
-- Create meaningful branching paths that make the story feel epic
-- Total nodes should be 30-50 for a truly epic experience
+- Create 12-20 nodes total
+- Root node (id:1) must have 3 choices
+- Each non-ending node should have 2-3 choices
+- Include 4-6 endings (mix of winning and losing)
+- Depth: 3-4 levels from root to endings
+- Each node content: 3-4 sentences of rich, descriptive text
+- Make choices meaningful and leading to different outcomes
 
 Return ONLY the JSON. No other text.
 """
-
-INTERACTIVE_STORY_PROMPT = STORY_PROMPT
 
 FULL_STORY_PROMPT = """
 Write a complete epic story based on the theme: {theme}

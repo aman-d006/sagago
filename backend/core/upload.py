@@ -1,89 +1,169 @@
 import os
 import uuid
-import io
+import shutil
+from pathlib import Path
 from fastapi import UploadFile, HTTPException
+from datetime import datetime
+import logging
+
 from core.config import settings
+from db.database import get_turso_client, settings as db_settings
 
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
-    print("Warning: PIL not available, images will be saved without optimization")
+logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
-MAX_FILE_SIZE = settings.MAX_UPLOAD_SIZE
+ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'}
+MAX_FILE_SIZE = 10 * 1024 * 1024 
 
-# Get absolute base directory
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+async def save_upload_file(file: UploadFile, subfolder: str = "stories", user_id: int = None, story_id: int = None) -> str:
+    """Save uploaded file and return URL"""
+    try:
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"File type {file_ext} not allowed")
 
-async def save_upload_file(upload_file: UploadFile, subdir: str = "stories") -> str:
-    # Check file extension
-    file_ext = os.path.splitext(upload_file.filename)[1].lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"File type {file_ext} not allowed. Allowed: {ALLOWED_EXTENSIONS}")
-    
-    # Read file contents
-    contents = await upload_file.read()
-    file_size = len(contents)
-    
-    # Check file size
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
-    
-    # Generate unique filename
-    file_id = str(uuid.uuid4())
-    filename = f"{file_id}{file_ext}"
-    
-    # Create absolute directory path
-    upload_dir = os.path.join(BASE_DIR, settings.UPLOAD_DIR, subdir)
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    file_path = os.path.join(upload_dir, filename)
-    
-    print(f"💾 Saving file to: {file_path}")
-    
-    if HAS_PIL:
-        # Optimize image with PIL
-        try:
-            img = Image.open(io.BytesIO(contents))
-            
-            # Convert RGBA to RGB if necessary
-            if img.mode in ('RGBA', 'LA', 'P'):
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
-                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                img = background
-            
-            # Resize if too large (max 1200x1200)
-            img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
-            
-            # Save with optimization
-            img.save(file_path, optimize=True, quality=85)
-            print(f"✅ Image saved with optimization: {file_path}")
-            
-        except Exception as e:
-            print(f"❌ PIL processing failed: {e}, falling back to direct save")
-            with open(file_path, "wb") as f:
-                f.write(contents)
-    else:
-        # Save directly without optimization
-        with open(file_path, "wb") as f:
-            f.write(contents)
-        print(f"✅ Image saved directly: {file_path}")
-    
-    # Return the URL path
-    return f"/uploads/{subdir}/{filename}"
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+        
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"File size too large. Max {MAX_FILE_SIZE//(1024*1024)}MB")
+        
+        unique_id = str(uuid.uuid4())
+        filename = f"{unique_id}{file_ext}"
+        
+      
+        upload_dir = Path(settings.UPLOAD_DIR) / subfolder
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+      
+        file_path = upload_dir / filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+       
+        url_path = f"/uploads/{subfolder}/{filename}"
 
-def delete_upload_file(file_url: str):
+        if db_settings.USE_TURSO:
+            try:
+                with get_turso_client() as client:
+                    user_id_str = str(user_id) if user_id else "NULL"
+                    story_id_str = str(story_id) if story_id else "NULL"
+                    
+                    client.execute(
+                        f"""
+                        INSERT INTO images (
+                            filename, original_filename, file_path, url_path, 
+                            file_size, mime_type, user_id, story_id, created_at
+                        ) VALUES (
+                            '{filename}', '{file.filename.replace("'", "''")}', 
+                            '{str(file_path)}', '{url_path}', 
+                            {file_size}, '{file.content_type}', 
+                            {user_id_str}, {story_id_str}, CURRENT_TIMESTAMP
+                        )
+                        """,
+                        []
+                    )
+                    logger.info(f"✅ Image metadata saved to database: {filename}")
+            except Exception as e:
+                logger.error(f"Error saving image metadata: {e}")
+        
+        logger.info(f"✅ File saved: {filename}")
+        return url_path
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+async def delete_upload_file(file_url: str) -> bool:
     """Delete uploaded file by URL"""
-    if not file_url or not file_url.startswith("/uploads/"):
-        return
+    try:
     
-    file_path = file_url.replace("/uploads/", "")
-    full_path = os.path.join(BASE_DIR, settings.UPLOAD_DIR, file_path)
+        filename = os.path.basename(file_url)
+        
+        
+        if db_settings.USE_TURSO:
+            with get_turso_client() as client:
+                result = client.query_one(
+                    f"SELECT file_path FROM images WHERE url_path = '{file_url}' OR filename = '{filename}'",
+                    []
+                )
+                if result:
+                    file_path = result[0]['value'] if isinstance(result[0], dict) else result[0]
+                 
+                    client.execute(
+                        f"DELETE FROM images WHERE url_path = '{file_url}' OR filename = '{filename}'",
+                        []
+                    )
+                else:
+                   
+                    for subfolder in ['stories', 'avatars']:
+                        potential_path = Path(settings.UPLOAD_DIR) / subfolder / filename
+                        if potential_path.exists():
+                            file_path = str(potential_path)
+                            break
+                    else:
+                        logger.warning(f"File not found in database: {filename}")
+                        return False
+        else:
+            # Try to find in filesystem
+            file_path = None
+            for subfolder in ['stories', 'avatars']:
+                potential_path = Path(settings.UPLOAD_DIR) / subfolder / filename
+                if potential_path.exists():
+                    file_path = str(potential_path)
+                    break
+        
+        # Delete physical file
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"✅ File deleted: {file_path}")
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error deleting file: {e}")
+        return False
+
+def get_image_url(filename: str, subfolder: str = "stories") -> str:
+    """Get URL for an image by filename"""
+    return f"/uploads/{subfolder}/{filename}"
+
+def get_image_metadata(image_id: int = None, filename: str = None) -> dict:
+    """Get image metadata from database"""
+    if not db_settings.USE_TURSO:
+        return None
     
-    if os.path.exists(full_path):
-        os.remove(full_path)
-        print(f"🗑️ Deleted file: {full_path}")
+    try:
+        with get_turso_client() as client:
+            if image_id:
+                result = client.query_one(
+                    f"SELECT * FROM images WHERE id = {image_id}",
+                    []
+                )
+            elif filename:
+                result = client.query_one(
+                    f"SELECT * FROM images WHERE filename = '{filename}'",
+                    []
+                )
+            else:
+                return None
+            
+            if result:
+                return {
+                    "id": result[0]['value'] if isinstance(result[0], dict) else result[0],
+                    "filename": result[1]['value'] if isinstance(result[1], dict) else result[1],
+                    "original_filename": result[2]['value'] if isinstance(result[2], dict) else result[2],
+                    "file_path": result[3]['value'] if isinstance(result[3], dict) else result[3],
+                    "url_path": result[4]['value'] if isinstance(result[4], dict) else result[4],
+                    "file_size": result[5]['value'] if isinstance(result[5], dict) else result[5],
+                    "mime_type": result[6]['value'] if isinstance(result[6], dict) else result[6],
+                    "user_id": result[7]['value'] if isinstance(result[7], dict) else result[7],
+                    "story_id": result[8]['value'] if isinstance(result[8], dict) else result[8],
+                    "created_at": result[9]['value'] if isinstance(result[9], dict) else result[9]
+                }
+            return None
+    except Exception as e:
+        logger.error(f"Error getting image metadata: {e}")
+        return None

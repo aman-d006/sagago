@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta 
 import logging
 
 from db.database import get_db, settings
@@ -21,57 +21,69 @@ def get_feed(
     logger.info(f"Getting {feed_type} feed for user {current_user.id}")
     
     if settings.USE_TURSO:
-        offset = (page - 1) * per_page
-        
-        following = helpers.get_following(current_user.id, limit=100)
-        following_ids = [f["id"] for f in following]
-        
-        stories = []
-        if feed_type == "following":
-            for user_id in following_ids:
-                user_stories = helpers.get_user_stories(user_id, limit=10)
-                stories.extend(user_stories)
-        else:
-            stories = helpers.get_feed_stories(feed_type, timeframe, page, per_page)
-        
-        stories.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
-        
-        paginated = stories[offset:offset+per_page]
-        total = len(stories)
-        pages = (total + per_page - 1) // per_page
-        
-        feed_stories = []
-        for story in paginated:
-            is_liked = helpers.is_liked(current_user.id, story["id"])
-            author = helpers.get_user_by_id(story["user_id"])
+        try:
+            offset = (page - 1) * per_page
             
-            feed_stories.append({
-                "id": story["id"],
-                "title": story["title"],
-                "excerpt": story.get("excerpt", story["title"]),
-                "cover_image": story.get("cover_image"),
-                "author": {
-                    "id": author["id"] if author else 0,
-                    "username": author["username"] if author else "Unknown",
-                    "full_name": author.get("full_name") if author else None,
-                    "avatar_url": author.get("avatar_url") if author else None
-                },
-                "like_count": story.get("like_count", 0),
-                "comment_count": story.get("comment_count", 0),
-                "view_count": story.get("view_count", 0),
-                "created_at": story.get("created_at"),
-                "is_liked_by_current_user": is_liked
-            })
-        
-        return {
-            "stories": feed_stories,
-            "total": total,
-            "page": page,
-            "pages": pages,
-            "has_next": page < pages,
-            "has_prev": page > 1
-        }
-    
+            following = helpers.get_following(current_user.id, limit=100)
+            following_ids = [f["id"] for f in following]
+            
+            stories = []
+            if feed_type == "following":
+                for user_id in following_ids:
+                    user_stories = helpers.get_user_stories(user_id, limit=10)
+                    stories.extend(user_stories)
+            else:
+                stories = helpers.get_feed_stories(feed_type, timeframe, page, per_page)
+           
+            stories.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
+            
+            paginated = stories[offset:offset+per_page]
+            total = len(stories)
+            pages = (total + per_page - 1) // per_page
+            
+            feed_stories = []
+            for story in paginated:
+                is_liked = helpers.is_liked(current_user.id, story["id"])
+                author = helpers.get_user_by_id(story["user_id"])
+                
+                feed_stories.append({
+                    "id": story["id"],
+                    "title": story["title"],
+                    "excerpt": story.get("excerpt", story["title"]),
+                    "cover_image": story.get("cover_image"),
+                    "author": {
+                        "id": author["id"] if author else 0,
+                        "username": author["username"] if author else "Unknown",
+                        "full_name": author.get("full_name") if author else None,
+                        "avatar_url": author.get("avatar_url") if author else None
+                    },
+                    "like_count": story.get("like_count", 0),
+                    "comment_count": story.get("comment_count", 0),
+                    "view_count": story.get("view_count", 0),
+                    "created_at": story.get("created_at"),
+                    "is_liked_by_current_user": is_liked
+                })
+            
+            return {
+                "stories": feed_stories,
+                "total": total,
+                "page": page,
+                "pages": pages,
+                "has_next": page < pages,
+                "has_prev": page > 1
+            }
+        except Exception as e:
+            logger.error(f"Error in get_feed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "stories": [],
+                "total": 0,
+                "page": page,
+                "pages": 1,
+                "has_next": False,
+                "has_prev": False
+            }
     else:
         from sqlalchemy.orm import Session
         from sqlalchemy import desc, func, and_

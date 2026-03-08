@@ -209,13 +209,16 @@ def mark_as_read(
 ):
     logger.info(f"Marking bookmark as read for user {current_user.id}, story {story_id}")
     
+    if story_id is None or story_id == 0:
+        raise HTTPException(status_code=400, detail="Invalid story ID")
+    
     if settings.USE_TURSO:
         try:
-            
+          
             is_bookmarked = helpers.is_bookmarked(current_user.id, story_id)
             if not is_bookmarked:
                 raise HTTPException(status_code=404, detail="Bookmark not found")
-         
+            
             with get_turso_client() as client:
                 user_id_str = str(current_user.id)
                 story_id_str = str(story_id)

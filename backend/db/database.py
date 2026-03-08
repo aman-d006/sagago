@@ -75,7 +75,7 @@ def create_turso_tables():
             )
         """)
        
-       
+
         client.execute("""
             CREATE TABLE IF NOT EXISTS story_views (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +137,24 @@ def create_turso_tables():
             )
         """)
         
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                url_path TEXT NOT NULL,
+                file_size INTEGER,
+                mime_type TEXT,
+                user_id INTEGER,
+                story_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+            )
+        """)
+        logger.info("✅ Images table created/verified in Turso")
+
         client.execute("""
             CREATE TABLE IF NOT EXISTS story_options (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

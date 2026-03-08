@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from typing import List, Optional
 import logging
 
+from backend.core.upload import save_upload_file
+from backend.models.user import User
 from db.database import get_db, settings
 from db import helpers
 from core.auth import get_current_active_user
@@ -798,3 +800,38 @@ def get_user_by_id(
             "following_count": following_count,
             "stories_count": stories_count
         }
+    
+@router.post("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user = Depends(get_current_active_user)
+):
+    """Upload user avatar"""
+    try:
+        file_url = await save_upload_file(
+            file, 
+            "avatars", 
+            user_id=current_user.id
+        )
+        
+        if settings.USE_TURSO:
+            helpers.update_user(current_user.id, {
+                "avatar_url": file_url
+            })
+        else:
+            from sqlalchemy.orm import Session
+            db = next(get_db())
+            user = db.query(User).filter(User.id == current_user.id).first()
+            if user:
+                user.avatar_url = file_url
+                db.commit()
+        
+        return {
+            "url": file_url,
+            "message": "Avatar uploaded successfully"
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Avatar upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")

@@ -1577,3 +1577,20 @@ def get_favorite_templates(user_id: int) -> List[Dict]:
     except Exception as e:
         logger.error(f"Error in get_favorite_templates: {e}")
         return []
+
+def mark_bookmark_as_read(user_id: int, story_id: int) -> bool:
+    """Mark a bookmark as read"""
+    if not settings.USE_TURSO:
+        return False
+    try:
+        with get_turso_client() as client:
+            user_id_str = str(user_id)
+            story_id_str = str(story_id)
+            client.execute(
+                f"UPDATE bookmarks SET is_read = 1 WHERE user_id = {user_id_str} AND story_id = {story_id_str}",
+                []
+            )
+            return True
+    except Exception as e:
+        logger.error(f"Error marking bookmark as read: {e}")
+        return False

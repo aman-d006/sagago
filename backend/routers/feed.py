@@ -411,54 +411,73 @@ def get_popular_feed(
             "has_prev": page > 1
         }
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from typing import List, Optional
+from datetime import datetime, timedelta
+import logging
+
 @router.get("/latest", response_model=dict)
 def get_latest_feed(
+    response: Response,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=50),
     current_user = Depends(get_current_user_optional)
 ):
-    logger.info(f"Getting latest feed")
+    logger.info(f"Getting latest feed, page {page}")
+    
+    response.headers["Cache-Control"] = "max-age=60, stale-while-revalidate=30"
     
     if settings.USE_TURSO:
-        stories = helpers.get_feed_stories("latest", "all", page, per_page)
-        
-        total = len(stories)
-        pages = (total + per_page - 1) // per_page
-        
-        feed_stories = []
-        for story in stories:
-            is_liked = False
-            if current_user:
-                is_liked = helpers.is_liked(current_user.id, story["id"])
+        try:
+            stories = helpers.get_feed_stories("latest", "all", page, per_page)
             
-            author = helpers.get_user_by_id(story["user_id"])
+            total = len(stories)
+            pages = (total + per_page - 1) // per_page
             
-            feed_stories.append({
-                "id": story["id"],
-                "title": story["title"],
-                "excerpt": story.get("excerpt", story["title"]),
-                "cover_image": story.get("cover_image"),
-                "author": {
-                    "id": author["id"] if author else 0,
-                    "username": author["username"] if author else "Unknown",
-                    "full_name": author.get("full_name") if author else None,
-                    "avatar_url": author.get("avatar_url") if author else None
-                },
-                "like_count": story.get("like_count", 0),
-                "comment_count": story.get("comment_count", 0),
-                "view_count": story.get("view_count", 0),
-                "created_at": story.get("created_at"),
-                "is_liked_by_current_user": is_liked
-            })
-        
-        return {
-            "stories": feed_stories,
-            "total": total,
-            "page": page,
-            "pages": pages,
-            "has_next": page < pages,
-            "has_prev": page > 1
-        }
+            feed_stories = []
+            for story in stories:
+                is_liked = False
+                if current_user:
+                    is_liked = helpers.is_liked(current_user.id, story["id"])
+                
+                author = helpers.get_user_by_id(story["user_id"])
+                
+                feed_stories.append({
+                    "id": story["id"],
+                    "title": story["title"],
+                    "excerpt": story.get("excerpt", story["title"]),
+                    "cover_image": story.get("cover_image"),
+                    "author": {
+                        "id": author["id"] if author else 0,
+                        "username": author["username"] if author else "Unknown",
+                        "full_name": author.get("full_name") if author else None,
+                        "avatar_url": author.get("avatar_url") if author else None
+                    },
+                    "like_count": story.get("like_count", 0),
+                    "comment_count": story.get("comment_count", 0),
+                    "view_count": story.get("view_count", 0),
+                    "created_at": story.get("created_at"),
+                    "is_liked_by_current_user": is_liked
+                })
+            
+            return {
+                "stories": feed_stories,
+                "total": total,
+                "page": page,
+                "pages": pages,
+                "has_next": page < pages,
+                "has_prev": page > 1
+            }
+        except Exception as e:
+            logger.error(f"Error fetching feed: {e}")
+            return {
+                "stories": [],
+                "total": 0,
+                "page": page,
+                "pages": 1,
+                "has_next": False,
+                "has_prev": False
+            }
     
     else:
         from sqlalchemy.orm import Session

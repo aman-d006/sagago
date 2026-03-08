@@ -4,7 +4,7 @@ from typing import List, Optional
 import logging
 from datetime import datetime
 
-from db.database import get_db, settings
+from db.database import get_db, get_turso_client, settings
 from db import helpers
 from core.auth import get_current_active_user
 
@@ -207,14 +207,29 @@ def mark_as_read(
     story_id: int,
     current_user = Depends(get_current_active_user)
 ):
-    logger.info(f"🔖 Marking bookmark as read for user {current_user.id}, story {story_id}")
+    logger.info(f"Marking bookmark as read for user {current_user.id}, story {story_id}")
     
     if settings.USE_TURSO:
-        is_bookmarked = helpers.is_bookmarked(current_user.id, story_id)
-        if not is_bookmarked:
-            raise HTTPException(status_code=404, detail="Bookmark not found")
-        
-        return {"message": "Bookmark marked as read"}
+        try:
+            
+            is_bookmarked = helpers.is_bookmarked(current_user.id, story_id)
+            if not is_bookmarked:
+                raise HTTPException(status_code=404, detail="Bookmark not found")
+         
+            with get_turso_client() as client:
+                user_id_str = str(current_user.id)
+                story_id_str = str(story_id)
+                client.execute(
+                    f"UPDATE bookmarks SET is_read = 1 WHERE user_id = {user_id_str} AND story_id = {story_id_str}",
+                    []
+                )
+            
+            return {"message": "Bookmark marked as read"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error marking bookmark as read: {e}")
+            raise HTTPException(status_code=500, detail="Failed to mark as read")
     
     else:
         from sqlalchemy.orm import Session
@@ -234,7 +249,7 @@ def mark_as_read(
         db.commit()
         
         return {"message": "Bookmark marked as read"}
-
+    
 @router.get("/check/{story_id}")
 def check_bookmark(
     story_id: int,

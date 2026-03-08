@@ -30,18 +30,32 @@ def get_session_id(session_id: Optional[str] = Cookie(None)):
     return session_id
 
 def build_complete_story_tree(story_id: int, current_user=None) -> Optional[dict]:
+    """Build complete story tree for interactive stories"""
     if settings.USE_TURSO:
         try:
             story = helpers.get_story(story_id)
             if not story:
+                logger.error(f"Story {story_id} not found")
                 return None
+            
             with get_turso_client() as client:
-                nodes = client.query(f"SELECT * FROM story_nodes WHERE story_id = {story_id}", [])
-                if not nodes:
+
+                nodes = client.query(
+                    f"SELECT * FROM story_nodes WHERE story_id = {story_id} ORDER BY id",
+                    []
+                )
+                
+                if not nodes or len(nodes) == 0:
+                    logger.warning(f"No nodes found for story {story_id}")
                     return None
+                
                 node_dict = {}
+                root_node = None
+                
                 for node in nodes:
                     node_id = int(get_value(node[0]))
+                    is_root = bool(int(get_value(node[4]))) if get_value(node[4]) else False
+                    
                     node_dict[node_id] = {
                         "id": node_id,
                         "content": get_value(node[3]),
@@ -49,24 +63,30 @@ def build_complete_story_tree(story_id: int, current_user=None) -> Optional[dict
                         "is_winning_ending": bool(int(get_value(node[6]))) if get_value(node[6]) else False,
                         "options": []
                     }
+                    
+                    if is_root:
+                        root_node = node_dict[node_id]
+     
                 for node_id in node_dict:
-                    options = client.query(f"SELECT next_node_id, text FROM story_options WHERE node_id = {node_id}", [])
+                    options = client.query(
+                        f"SELECT next_node_id, text FROM story_options WHERE node_id = {node_id} ORDER BY id",
+                        []
+                    )
                     for opt in options:
                         node_dict[node_id]["options"].append({
                             "node_id": int(get_value(opt[0])),
                             "text": get_value(opt[1])
                         })
-                root_node = None
-                for node_id, node in node_dict.items():
-                    if node_id == story.get("root_node_id"):
-                        root_node = node
-                        break
+                
                 if not root_node and node_dict:
                     root_node = list(node_dict.values())[0]
+                
                 is_liked = False
                 if current_user:
                     is_liked = helpers.is_liked(current_user.id, story_id)
+                
                 author = helpers.get_user_by_id(story["user_id"])
+                
                 return {
                     "id": story["id"],
                     "title": story["title"],
@@ -88,6 +108,8 @@ def build_complete_story_tree(story_id: int, current_user=None) -> Optional[dict
                 }
         except Exception as e:
             logger.error(f"Error building story tree: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     return None
 
@@ -617,23 +639,30 @@ def get_story_by_id(
     current_user = Depends(get_current_user_optional)
 ):
     response.set_cookie(key="session_id", value=session_id, httponly=True)
+    
     if settings.USE_TURSO:
         story = helpers.get_story(story_id)
         if not story:
             raise HTTPException(status_code=404, detail="Story not found")
+        
         user_id = current_user.id if current_user else None
         AnalyticsService.track_story_view(None, story_id, user_id, session_id)
+        
+        # Check if story has nodes (interactive)
         with get_turso_client() as client:
-            nodes = client.query(f"SELECT COUNT(*) FROM story_nodes WHERE story_id = {story_id}", [])
-            has_nodes = nodes and len(nodes) > 0 and int(get_value(nodes[0][0])) > 0
+            nodes_count = client.query_one(f"SELECT COUNT(*) FROM story_nodes WHERE story_id = {story_id}", [])
+            has_nodes = nodes_count and int(get_value(nodes_count[0])) > 0
+        
+        # If interactive story, return full tree
         if has_nodes:
             complete_story = build_complete_story_tree(story_id, current_user)
             if complete_story:
                 return complete_story
+        
+        # Otherwise return regular story
         author = helpers.get_user_by_id(story["user_id"]) if story.get("user_id") else None
-        is_liked = False
-        if current_user:
-            is_liked = helpers.is_liked(current_user.id, story_id)
+        is_liked = helpers.is_liked(current_user.id, story_id) if current_user else False
+        
         return {
             "id": story["id"],
             "title": story["title"],
